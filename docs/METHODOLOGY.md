@@ -243,6 +243,28 @@ band. Do not change coefficients because of a short streak. Version 2 coefficien
 calibrated using separate training/calibration and out-of-sample test datasets. Never optimise on data later
 used to claim out-of-sample performance.
 
+## 27a. Weekly review (implemented: `fpredict review`)
+
+Each match week, after the main analysis:
+
+1. **Learn.** Newly finished league matches are rebuilt from pre-kick-off data only (team samples and league
+   averages from matches that kicked off at least 3 hours earlier) and added to `data/backtest_store.jsonl`,
+   with each team's last 10 league matches so that longer samples can be tested. No odds are used.
+2. **Backtest.** Every stored match is re-predicted with Version 1 and with each alternative in a fixed,
+   pre-declared list (`VARIANTS` in `src/fpredict/review.py`): shrinkage share, stat weights (including no xG and
+   xG only), recency weights, 8- and 10-match samples, and wider score limits. Additions to the list must be
+   deliberate and disclosed, never a reaction to one week's results.
+3. **Suggest.** Matches are split by kick-off date: the oldest 60% form the calibration set, the newest 40% the
+   test set. An alternative passes a review only if: it has a lower Brier score than Version 1 on the
+   calibration set; it has a lower Brier score on the test set, with the range (Bonferroni-corrected for the
+   number of alternatives, family-wide 5%) entirely above zero; its test log loss is also lower; there are at least
+   600 stored and 250 test matches. It is **suggested** only after passing two consecutive reviews
+   (`data/review_history.csv`).
+
+The review never changes coefficients. A suggestion is adopted only with the user's agreement, recorded here as a
+new model version, and from then on judged only on matches played after the change. The test set grows and is
+reused every week, so a pass is strong evidence, not proof. The review measures accuracy, not profitability.
+
 ## 28. Limitations
 
 Five matches is a small sample; opponent quality varies and is only indirectly considered; red cards can

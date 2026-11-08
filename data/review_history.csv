@@ -1,0 +1,14 @@
+review_date,n_total,n_test,variant,cal_gain,test_gain,test_lo,test_hi,enough_data,passed
+2026-11-08,513,205,Shrinkage: 50% model / 50% league,0.000536,0.000754,-0.002772,0.004280,False,False
+2026-11-08,513,205,Shrinkage: 62.5% model,0.000401,0.000529,-0.001231,0.002289,False,False
+2026-11-08,513,205,Shrinkage: 87.5% model,-0.000676,-0.000835,-0.002589,0.000920,False,False
+2026-11-08,513,205,Shrinkage: none (100% model),-0.001639,-0.001929,-0.005416,0.001557,False,False
+2026-11-08,513,205,Inputs: no xG (SOT 45 / shots 35 / corners 20),0.002194,-0.001657,-0.007486,0.004171,False,False
+2026-11-08,513,205,Inputs: xG-heavy (70/15/10/5),-0.001409,0.000010,-0.002211,0.002231,False,False
+2026-11-08,513,205,Inputs: xG only,-0.003972,-0.000947,-0.006081,0.004186,False,False
+2026-11-08,513,205,Inputs: equal weights (25/25/25/25),0.002138,-0.001164,-0.004970,0.002641,False,False
+2026-11-08,513,205,Recency: flat (20% each),-0.000794,-0.002353,-0.006467,0.001761,False,False
+2026-11-08,513,205,Recency: steeper (40/25/17.5/10/7.5),0.000053,0.000290,-0.002448,0.003028,False,False
+2026-11-08,513,190,"Sample: 8 matches, decaying weights",0.004989,-0.000334,-0.004991,0.004322,False,False
+2026-11-08,513,77,"Sample: 10 matches, decaying weights",,0.002668,-0.004623,0.009959,False,False
+2026-11-08,513,205,Score limits: wider (0.50-2.00),0.001408,0.000098,-0.001737,0.001933,False,False

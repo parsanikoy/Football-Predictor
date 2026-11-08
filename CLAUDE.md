@@ -63,9 +63,25 @@ Useful options: `--leagues epl,laliga`, `--only "Liverpool"` (repeatable), `--fu
 - **Stats revisions:** PitchAPI can revise xG shortly after full time. Stats less than 48 hours old are
   re-fetched each run rather than cached.
 
+## Weekly review (every match week)
+
+After the analysis (it needs no Odds API key or credits), run:
+
+```bash
+PYTHONPATH=src python3 -m fpredict review
+```
+
+It stores the newly finished matches with their pre-kick-off inputs, backtests the pre-declared alternatives against
+Version 1, and writes `reports/review_<date>.md` (METHODOLOGY §27a). Summarise it in chat: the Version 1 health
+check, the top alternatives, and whether anything is **SUGGESTED**. If something is suggested, explain the
+evidence and ask the user whether to adopt it; never change `config.py` without their agreement. Until the
+data thresholds are met, describe gains as directional only. Don't add or remove alternatives in response to one
+week's results; propose any addition to the user first.
+
 ## After each analysis
 
-Commit the new report in `reports/`, the updated `data/prediction_log.csv` and any changes to
+Commit the new reports in `reports/`, the updated `data/prediction_log.csv`, `data/backtest_store.jsonl`,
+`data/review_history.csv` and any changes to
 `data/user_supplied.json` or `data/team_aliases.json`, then push, so the record survives the session.
 
 ## Version 2 (later)

@@ -14,6 +14,10 @@ from . import analysis
 from . import config as C
 from . import model as M
 
+# Matches stored per team for the weekly review, so longer samples can be tested (review.py).
+STORE_SAMPLE = 10
+STAT_FIELDS = ("xg", "shots", "sot", "corners", "conc_xg", "conc_shots", "conc_sot", "conc_corners")
+
 # A match only counts as "already finished" for a later fixture if it kicked off at least this long
 # before that fixture, so that a match still in progress at kick-off is never used.
 FINISH_GAP = dt.timedelta(hours=3)
@@ -69,9 +73,20 @@ def run(pitch, leagues, date_from, date_to, fallback=(), only=(), user=None, log
                          "home_attack": fx["H"]["attack"], "home_dw": fx["H"]["dw"],
                          "away_attack": fx["A"]["attack"], "away_dw": fx["A"]["dw"],
                          "score": f"{m['score_home']}-{m['score_away']}", "goals": goals,
-                         "p": fx["P"], "bench": bench, "y": {ln: int(goals > ln) for ln in C.LINES}})
+                         "p": fx["P"], "bench": bench, "y": {ln: int(goals > ln) for ln in C.LINES},
+                         "inputs": pre_inputs(pre, fx)})
     return {"generated_at": analysis.iso(now), "window": (date_from, date_to), "leagues": leagues,
             "rows": rows, "skipped": skipped, "summary": summarise(rows)}
+
+
+def pre_inputs(pre, fx):
+    """The raw pre-kick-off inputs, kept so the weekly review can re-run the model with other settings:
+    league averages and each team's last STORE_SAMPLE league matches (most recent first)."""
+    out = {"baseline": {k: pre["baseline"].get(k) for k in ("xg", "shots", "sot", "corners", "home_goals", "away_goals")}}
+    for side in ("home", "away"):
+        rows, _ = analysis.team_sample(pre, fx[side + "_id"], n=STORE_SAMPLE)
+        out[side] = [{"date": r["date"], **{f: r.get(f) for f in STAT_FIELDS}} for r in rows]
+    return out
 
 
 def _scores(rows, ln):

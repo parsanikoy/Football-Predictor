@@ -89,10 +89,10 @@ def league_context(pitch, league, now, user):
             "n_finished": n, "teams": teams}
 
 
-def team_sample(ctx, team_id):
-    """Five most recent completed league matches. Returns (rows, missing[(date, opponent, field)])."""
+def team_sample(ctx, team_id, n=C.SAMPLE_SIZE):
+    """n most recent completed league matches (five for the model). Returns (rows, missing[(date, opponent, field)])."""
     played = sorted((m for m in ctx["finished"] if team_id in (m["home_team"]["id"], m["away_team"]["id"])),
-                    key=lambda m: m["time_utc"], reverse=True)[:C.SAMPLE_SIZE]
+                    key=lambda m: m["time_utc"], reverse=True)[:n]
     rows, missing = [], []
     for m in played:
         s = "home" if m["home_team"]["id"] == team_id else "away"

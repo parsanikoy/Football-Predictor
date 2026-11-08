@@ -1,8 +1,8 @@
-"""Command line:  python -m fpredict run|backtest|settle|leagues  (see README.md)."""
+"""Command line:  python -m fpredict run|backtest|review|settle|leagues  (see README.md)."""
 import argparse, datetime as dt, os, pathlib, sys
 
 from . import config as C
-from . import analysis, backtest, log, report
+from . import analysis, backtest, log, report, review
 from .odds import OddsClient
 from .stats import PitchClient
 
@@ -45,6 +45,12 @@ def main(argv=None):
                    help="match substring (or 'all') the USER has approved for the fallback model")
     b.add_argument("--user-data", default=str(ROOT / "data" / "user_supplied.json"))
     b.add_argument("--out", help="report path (default reports/backtest_<date>_<from>_<to>.md; CSV alongside)")
+    v = sub.add_parser("review", help="weekly: store newly finished matches, backtest alternatives, suggest tweaks")
+    v.add_argument("--from", dest="date_from", help="fetch finished matches from this date "
+                   "(default: 3 days before the latest stored match; required when the store is empty)")
+    v.add_argument("--to", dest="date_to", default=str(today))
+    v.add_argument("--no-fetch", action="store_true", help="only re-evaluate the stored matches")
+    v.add_argument("--out", help="report path (default reports/review_<date>.md)")
     sub.add_parser("settle", help="fill final scores into the prediction log")
     sub.add_parser("leagues", help="list configured leagues")
     a = p.parse_args(argv)
@@ -60,6 +66,8 @@ def main(argv=None):
         print(f"settled {s} rows; {pend} rows still pending")
         return 0
 
+    if a.cmd == "review":
+        return run_review(a, pitch)
     leagues = [x.strip() for x in a.leagues.split(",") if x.strip()]
     bad = [x for x in leagues if x not in C.LEAGUES]
     if bad:
@@ -96,6 +104,35 @@ def main(argv=None):
     for f in res["fixtures"]:
         st[f["status"]] = st.get(f["status"], 0) + 1
     print(f"report: {out}\nfixtures: {st}\nqualifying selections: {len(res['recs'])}")
+    return 0
+
+
+def run_review(a, pitch):
+    added = updated = 0
+    window = None
+    if not a.no_fetch:
+        store = review.load_store()
+        start = a.date_from
+        if not start:
+            if not store:
+                print("ERROR: the review store is empty; pass --from <date> for the first review.", file=sys.stderr)
+                return 2
+            last = max(r["kickoff"] for r in store.values())[:10]
+            start = str(dt.date.fromisoformat(last) - dt.timedelta(days=3))
+        window = (start, a.date_to)
+        res = backtest.run(pitch, list(C.LEAGUES), start, a.date_to, user=analysis.load_user_supplied(
+            str(ROOT / "data" / "user_supplied.json")), log=lambda m: print(m, file=sys.stderr))
+        added, updated = review.update_store(res["rows"])
+        if res["skipped"]:
+            print(f"not stored (could not be modelled before kick-off): {len(res['skipped'])}", file=sys.stderr)
+    today = analysis.utcnow().strftime("%Y-%m-%d")
+    ev = review.apply_history(review.evaluate(review.load_store()), today)
+    out = pathlib.Path(a.out) if a.out else ROOT / "reports" / f"review_{today}.md"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(review.report(ev, today, added, updated, window))
+    sug = [r["variant"] for r in ev["results"] if r["status"].startswith("SUGGESTED")]
+    print(f"report: {out}\nstored matches: {ev['n_total']} (+{added} new, {updated} refreshed)\n"
+          f"suggested changes: {', '.join(sug) if sug else 'none'}")
     return 0
 
 

@@ -48,6 +48,15 @@ uses league-average goals only. It uses PitchAPI only, so it costs **no Odds API
 measure edge or ROI. It writes `reports/backtest_<date>_<from>_<to>.md` and a matching `.csv`; it does not
 touch the prediction log. Options: `--leagues`, `--only`, `--fallback`, `--out`.
 
+## Weekly review
+
+`fpredict review` adds newly finished matches, with their pre-kick-off inputs, to `data/backtest_store.jsonl`.
+It then backtests a fixed list of alternative settings against Version 1: shrinkage, stat weights, recency,
+sample length and score limits. It writes `reports/review_<date>.md` and only **suggests** a change after strict,
+pre-declared checks pass at two consecutive reviews (METHODOLOGY §27a). It never changes the model itself and
+uses no Odds API credits. The first review needs `--from <date>`; later ones continue from the stored data.
+`--no-fetch` re-evaluates the stored matches only.
+
 ## Keys
 
 - **The Odds API**: supplied at the start of each run as `ODDS_API_KEY`. It is never stored in the repo
