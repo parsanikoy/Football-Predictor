@@ -32,6 +32,34 @@ def load_user_supplied(path):
 
 
 # ---------------------------------------------------------------- league context
+def league_baseline(finished, league, user):
+    """League averages per team per match from the given finished matches (§4), plus user overrides.
+    -> (baseline, coverage, n_matches)"""
+    base, cov = {}, {}
+    for f in ("xg", "shots", "sot", "corners"):
+        vals = [m["stats"][s][f] for m in finished for s in ("home", "away") if f in m["stats"][s]]
+        base[f] = sum(vals) / len(vals) if vals else None
+        cov[f] = (len(vals), 2 * len(finished))
+    n = len(finished)
+    base["home_goals"] = sum(m["score_home"] for m in finished) / n if n else None
+    base["away_goals"] = sum(m["score_away"] for m in finished) / n if n else None
+    base["sources"] = {}
+    for f, v in user.get("baselines", {}).get(league, {}).items():
+        base[f] = float(v)
+        base["sources"][f] = "User supplied"
+    return base, cov, n
+
+
+def as_of(ctx, cutoff):
+    """Copy of a league context restricted to matches that kicked off before `cutoff` (ISO UTC),
+    with league averages recomputed from those matches only. Used by the backtest so that no
+    information from the match being predicted, or later, leaks into the prediction. User-supplied
+    baselines are NOT applied: they describe the league now, not as it stood at `cutoff`."""
+    finished = [m for m in ctx["finished"] if m["time_utc"] < cutoff]
+    base, cov, n = league_baseline(finished, ctx["league"], {})
+    return dict(ctx, finished=finished, baseline=base, coverage=cov, n_finished=n)
+
+
 def league_context(pitch, league, now, user):
     name, sport_key, lid = C.LEAGUES[league]
     data = pitch.league_matches(lid)
@@ -51,18 +79,7 @@ def league_context(pitch, league, now, user):
                 if f not in s[side]:
                     s[side][f] = float(v)
                     m["user_fields"].append(f"{side}.{f}")
-    base, cov = {}, {}
-    for f in ("xg", "shots", "sot", "corners"):
-        vals = [m["stats"][s][f] for m in finished for s in ("home", "away") if f in m["stats"][s]]
-        base[f] = sum(vals) / len(vals) if vals else None
-        cov[f] = (len(vals), 2 * len(finished))
-    n = len(finished)
-    base["home_goals"] = sum(m["score_home"] for m in finished) / n if n else None
-    base["away_goals"] = sum(m["score_away"] for m in finished) / n if n else None
-    base["sources"] = {}
-    for f, v in user.get("baselines", {}).get(league, {}).items():
-        base[f] = float(v)
-        base["sources"][f] = "User supplied"
+    base, cov, n = league_baseline(finished, league, user)
     teams = {}
     for m in matches:
         for side in ("home_team", "away_team"):

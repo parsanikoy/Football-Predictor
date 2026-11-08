@@ -70,7 +70,9 @@ Commit the new report in `reports/`, the updated `data/prediction_log.csv` and a
 
 ## Version 2 (later)
 
-Once enough predictions are settled, backtest per METHODOLOGY §27 (Brier score, log loss, calibration, ROI,
+`PYTHONPATH=src python3 -m fpredict backtest --from <date> --to <date>` scores pre-kick-off predictions
+for finished matches without odds (no Odds API key or credits needed; don't ask for the key for this
+command). It measures accuracy only, not edge or ROI. Once enough predictions are settled, backtest per METHODOLOGY §27 (Brier score, log loss, calibration, ROI,
 closing-line value, drawdown, by league, line and edge band) with separate calibration and out-of-sample
 sets. Don't change the Version 1 coefficients in `src/fpredict/config.py` without the user's agreement, and
 record any change in `docs/METHODOLOGY.md`.

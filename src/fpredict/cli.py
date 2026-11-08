@@ -1,8 +1,8 @@
-"""Command line:  python -m fpredict run|settle|leagues  (see README.md)."""
+"""Command line:  python -m fpredict run|backtest|settle|leagues  (see README.md)."""
 import argparse, datetime as dt, os, pathlib, sys
 
 from . import config as C
-from . import analysis, log, report
+from . import analysis, backtest, log, report
 from .odds import OddsClient
 from .stats import PitchClient
 
@@ -36,6 +36,15 @@ def main(argv=None):
                         "such as Grosvenor that only quote there)")
     r.add_argument("--no-log", action="store_true", help="do not append to data/prediction_log.csv")
     r.add_argument("--out", help="report path (default reports/<date>_<from>_<to>.md)")
+    b = sub.add_parser("backtest", help="score pre-kick-off predictions for finished matches (no odds)")
+    b.add_argument("--from", dest="date_from", default=str(today - dt.timedelta(days=7)))
+    b.add_argument("--to", dest="date_to", default=str(today))
+    b.add_argument("--leagues", default=",".join(C.LEAGUES), help="comma list of: " + ",".join(C.LEAGUES))
+    b.add_argument("--only", action="append", default=[], help="substring of 'Home v Away' to include (repeatable)")
+    b.add_argument("--fallback", action="append", default=[],
+                   help="match substring (or 'all') the USER has approved for the fallback model")
+    b.add_argument("--user-data", default=str(ROOT / "data" / "user_supplied.json"))
+    b.add_argument("--out", help="report path (default reports/backtest_<date>_<from>_<to>.md; CSV alongside)")
     sub.add_parser("settle", help="fill final scores into the prediction log")
     sub.add_parser("leagues", help="list configured leagues")
     a = p.parse_args(argv)
@@ -51,6 +60,22 @@ def main(argv=None):
         print(f"settled {s} rows; {pend} rows still pending")
         return 0
 
+    leagues = [x.strip() for x in a.leagues.split(",") if x.strip()]
+    bad = [x for x in leagues if x not in C.LEAGUES]
+    if bad:
+        p.error(f"unknown league(s): {bad}")
+    if a.cmd == "backtest":
+        res = backtest.run(pitch, leagues, a.date_from, a.date_to, fallback=a.fallback, only=a.only,
+                           user=analysis.load_user_supplied(a.user_data), log=lambda m: print(m, file=sys.stderr))
+        out = pathlib.Path(a.out) if a.out else \
+            ROOT / "reports" / f"backtest_{res['generated_at'][:10]}_{a.date_from}_{a.date_to}.md"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(backtest.report(res))
+        backtest.write_csv(res, out.with_suffix(".csv"))
+        print(f"report: {out}\ncsv: {out.with_suffix('.csv')}\nmodelled: {len(res['rows'])}; "
+              f"not modelled: {len(res['skipped'])}")
+        return 0
+
     odds = None
     if not a.no_odds:
         key = os.environ.get("ODDS_API_KEY")
@@ -59,10 +84,6 @@ def main(argv=None):
                   file=sys.stderr)
             return 2
         odds = OddsClient(key, "totals,alternate_totals" if a.full_odds else "alternate_totals")
-    leagues = [x.strip() for x in a.leagues.split(",") if x.strip()]
-    bad = [x for x in leagues if x not in C.LEAGUES]
-    if bad:
-        p.error(f"unknown league(s): {bad}")
     res = analysis.run(pitch, odds, leagues, a.date_from, a.date_to, fallback=a.fallback, only=a.only,
                        user=analysis.load_user_supplied(a.user_data), log=lambda m: print(m, file=sys.stderr))
     md = report.build(res)

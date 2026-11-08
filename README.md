@@ -25,6 +25,7 @@ Python 3.9+ with the standard library only; nothing to install.
 ```bash
 ODDS_API_KEY=your-key PYTHONPATH=src python3 -m fpredict run --from 2026-11-20 --to 2026-11-24
 PYTHONPATH=src python3 -m fpredict settle      # fill in final scores later
+PYTHONPATH=src python3 -m fpredict backtest --from 2026-11-06 --to 2026-11-08   # no odds, no credits
 PYTHONPATH=src python3 -m unittest discover -s tests
 ```
 
@@ -36,6 +37,16 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 | `--no-odds` | Skip The Odds API; use odds from `data/user_supplied.json` |
 | `--fallback "<match>"` / `all` | Use the Shots/SOT/Corners model where xG is missing (only after you agree) |
 | `--no-log` | Don't append to the prediction log |
+
+## Backtest (no odds)
+
+`fpredict backtest` takes finished league matches in a date window (default: the last 7 days) and rebuilds
+each prediction from data available before kick-off. Each team's five previous league matches and the league
+averages come only from matches that kicked off at least 3 hours earlier. It then scores Over 1.5/2.5/3.5
+against the real results with Brier score, log loss and calibration. The comparison is a benchmark that
+uses league-average goals only. It uses PitchAPI only, so it costs **no Odds API credits**, and it cannot
+measure edge or ROI. It writes `reports/backtest_<date>_<from>_<to>.md` and a matching `.csv`; it does not
+touch the prediction log. Options: `--leagues`, `--only`, `--fallback`, `--out`.
 
 ## Keys
 
