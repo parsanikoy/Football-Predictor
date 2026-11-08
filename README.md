@@ -14,7 +14,7 @@ domestic leagues and compares them with UK bookmaker prices. It is designed to b
    league averages.
 2. **Model** (`src/fpredict/model.py`): recency-weighted metrics → league-relative ratios → Attack and
    Defensive Weakness Scores → expected goals with 75/25 shrinkage → Poisson probabilities.
-3. **Odds** come from [The Odds API](https://the-odds-api.com) (UK region, `totals` and `alternate_totals`).
+3. **Odds** come from [The Odds API](https://the-odds-api.com) (UK region, `alternate_totals` market; `--full-odds` adds `totals`).
    Margin is removed where both Over and Under are quoted.
 4. **Output**: a Markdown report in `reports/` and one row per match and line in `data/prediction_log.csv`.
 
@@ -32,7 +32,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 |---|---|
 | `--leagues epl,laliga` | Limit leagues (`python3 -m fpredict leagues` lists the keys) |
 | `--only "Liverpool"` | Only fixtures whose "Home v Away" contains this text (repeatable) |
-| `--cheap-odds` | 1 Odds API credit per match instead of 2 (a few bookmakers drop out) |
+| `--full-odds` | Also fetch the main totals market: 2 Odds API credits per match instead of 1, adds a few bookmakers (e.g. Grosvenor) |
 | `--no-odds` | Skip The Odds API; use odds from `data/user_supplied.json` |
 | `--fallback "<match>"` / `all` | Use the Shots/SOT/Corners model where xG is missing (only after you agree) |
 | `--no-log` | Don't append to the prediction log |
@@ -40,7 +40,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 ## Keys
 
 - **The Odds API**: supplied at the start of each run as `ODDS_API_KEY`. It is never stored in the repo
-  (`.env` is git-ignored). Each priced match costs 2 credits; listing fixtures is free.
+  (`.env` is git-ignored). Each priced match costs 1 credit by default (2 with `--full-odds`); listing fixtures is free.
 - **PitchAPI**: sent as the `X-API-KEY` header. In Claude cloud sessions it is saved as a network secret
   and injected by the proxy. Locally, set `PITCHAPI_KEY`.
 

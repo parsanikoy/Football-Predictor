@@ -5,7 +5,7 @@ from .http import get_json
 
 
 class OddsClient:
-    def __init__(self, api_key, markets="totals,alternate_totals"):
+    def __init__(self, api_key, markets="alternate_totals"):
         if not api_key:
             raise ValueError("ODDS_API_KEY is not set. Ask the user for their Odds API key.")
         self.key = api_key

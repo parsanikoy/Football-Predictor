@@ -28,12 +28,14 @@ transparency, complete identification of missing data, probability calculation, 
 ODDS_API_KEY=<key> PYTHONPATH=src python3 -m fpredict run --from 2026-11-20 --to 2026-11-24
 ```
 
-Useful options: `--leagues epl,laliga`, `--only "Liverpool"` (repeatable), `--cheap-odds`,
+Useful options: `--leagues epl,laliga`, `--only "Liverpool"` (repeatable), `--full-odds`,
 `--no-odds`, `--fallback "<match>"` / `--fallback all`, `--no-log`, `--out <path>`.
 `PYTHONPATH=src python3 -m fpredict leagues` lists the league keys.
 
-- **Odds credits:** each priced match costs 2 Odds API credits (1 with `--cheap-odds`); listing events is
-  free. A full weekend across all ten leagues costs roughly 120 credits. Before a large run, tell the user
+- **Odds credits:** by default each priced match costs 1 Odds API credit (alternate totals market only);
+  `--full-odds` also fetches the main totals market for 2 credits per match, adding a few bookmakers such as
+  Grosvenor. Use `--full-odds` only when the user asks for it. Listing events is free. A full weekend across
+  all ten leagues costs roughly 60 credits (120 with `--full-odds`). Before a large run, tell the user
   the approximate cost. The run prints the credits remaining; pass that on.
 - **PitchAPI key:** in Claude cloud sessions the network proxy injects it into requests to
   `api.pitchapi.dev`; no key is needed in code. If PitchAPI returns 401/403, tell the user the saved

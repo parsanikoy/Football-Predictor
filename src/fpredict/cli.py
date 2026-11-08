@@ -31,8 +31,9 @@ def main(argv=None):
                    help="match substring (or 'all') the USER has approved for the fallback model")
     r.add_argument("--user-data", default=str(ROOT / "data" / "user_supplied.json"))
     r.add_argument("--no-odds", action="store_true", help="skip The Odds API (use user-supplied odds only)")
-    r.add_argument("--cheap-odds", action="store_true",
-                   help="request alternate_totals only (1 credit per match instead of 2; a few bookmakers drop out)")
+    r.add_argument("--full-odds", action="store_true",
+                   help="also request the main totals market (2 credits per match instead of 1; adds bookmakers "
+                        "such as Grosvenor that only quote there)")
     r.add_argument("--no-log", action="store_true", help="do not append to data/prediction_log.csv")
     r.add_argument("--out", help="report path (default reports/<date>_<from>_<to>.md)")
     sub.add_parser("settle", help="fill final scores into the prediction log")
@@ -57,7 +58,7 @@ def main(argv=None):
             print("ERROR: ODDS_API_KEY is not set. Ask the user for their Odds API key, or rerun with --no-odds.",
                   file=sys.stderr)
             return 2
-        odds = OddsClient(key, "alternate_totals" if a.cheap_odds else "totals,alternate_totals")
+        odds = OddsClient(key, "totals,alternate_totals" if a.full_odds else "alternate_totals")
     leagues = [x.strip() for x in a.leagues.split(",") if x.strip()]
     bad = [x for x in leagues if x not in C.LEAGUES]
     if bad:
