@@ -1,0 +1,54 @@
+{
+  "model": "fallback",
+  "source": "footballdata",
+  "leagues": [
+    "epl",
+    "laliga",
+    "seriea",
+    "bundesliga",
+    "ligue1",
+    "portugal",
+    "eredivisie",
+    "belgium",
+    "turkey",
+    "scotland"
+  ],
+  "calibration_seasons": [
+    "2017/2018",
+    "2018/2019",
+    "2019/2020",
+    "2020/2021",
+    "2021/2022",
+    "2022/2023",
+    "2023/2024"
+  ],
+  "test_seasons": [
+    "2024/2025",
+    "2025/2026"
+  ],
+  "variant": {
+    "model": "fallback",
+    "weights": {
+      "sot": 0.4,
+      "shots": 0.35,
+      "corners": 0.25
+    },
+    "recency": [
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1
+    ],
+    "shrink": 0.55,
+    "caps": true,
+    "dist": "dc",
+    "dist_param": -0.1,
+    "recency_label": "equal"
+  }
+}

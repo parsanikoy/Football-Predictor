@@ -38,6 +38,27 @@ def main(argv=None):
     r.add_argument("--out", help="report path (default reports/<date>_<from>_<to>.md)")
     sub.add_parser("settle", help="fill final scores into the prediction log")
     sub.add_parser("leagues", help="list configured leagues")
+    h = sub.add_parser("history", help="download historical data for backtesting")
+    h.add_argument("--source", choices=("footballdata", "pitchapi"), default="footballdata")
+    h.add_argument("--leagues", default=",".join(C.LEAGUES))
+    h.add_argument("--seasons", default="2017/2018:2025/2026", help="'A:B' range or comma list, e.g. 2023/2024")
+    b = sub.add_parser("backtest", help="replay the model on past seasons (docs/BACKTESTING.md)")
+    b.add_argument("--source", choices=("footballdata", "pitchapi"), default="footballdata",
+                   help="footballdata: shots/SOT/corners + O/U 2.5 odds (fallback model); pitchapi: adds xG")
+    b.add_argument("--leagues", default=",".join(C.LEAGUES))
+    b.add_argument("--seasons", help="'A:B' range or comma list (default: 2017/2018:2025/2026 for footballdata, "
+                                     "2021/2022:2025/2026 for pitchapi)")
+    b.add_argument("--test-seasons", help="held-out seasons (default: the last season in --seasons)")
+    b.add_argument("--model", choices=("preferred", "fallback"), help="default: preferred if the data has xG")
+    b.add_argument("--max-n", type=int, default=10, help="largest sample size the search may try")
+    b.add_argument("--carry-over", action="store_true", help="let team samples include previous-season matches")
+    b.add_argument("--odds", default="avg", choices=("avg", "max", "b365", "pin", "pin_close", "avg_close"))
+    b.add_argument("--margin", default="proportional", choices=("proportional", "shin", "power"))
+    b.add_argument("--min-edge", type=float, default=C.MIN_EDGE_PP)
+    b.add_argument("--both-sides", action="store_true", help="also bet Unders (V1 only recommends Overs)")
+    b.add_argument("--no-search", action="store_true", help="score V1 only")
+    b.add_argument("--passes", type=int, default=2)
+    b.add_argument("--out", help="report path (default reports/backtests/<date>_<source>_<model>.md)")
     a = p.parse_args(argv)
     load_dotenv()
 
@@ -45,6 +66,8 @@ def main(argv=None):
         for k, (n, s, l) in C.LEAGUES.items():
             print(f"{k:11} {n:26} odds={s:32} pitch={l}")
         return 0
+    if a.cmd in ("history", "backtest"):
+        return backtest_cmd(a, p)
     pitch = PitchClient()
     if a.cmd == "settle":
         s, pend = log.settle(pitch, analysis.iso(analysis.utcnow()))
@@ -75,6 +98,38 @@ def main(argv=None):
     for f in res["fixtures"]:
         st[f["status"]] = st.get(f["status"], 0) + 1
     print(f"report: {out}\nfixtures: {st}\nqualifying selections: {len(res['recs'])}")
+    return 0
+
+
+def backtest_cmd(a, p):
+    from . import backtest_run as R, history as H
+    leagues = [x.strip() for x in a.leagues.split(",") if x.strip()]
+    bad = [x for x in leagues if x not in C.LEAGUES]
+    if bad:
+        p.error(f"unknown league(s): {bad}")
+    err = lambda m: print(m, file=sys.stderr)
+    if a.cmd == "history":
+        for lg in leagues:
+            for s in R.parse_seasons(a.seasons):
+                try:
+                    rows = H.load_footballdata(lg, s) if a.source == "footballdata" else H.load_pitch(lg, s, log=err)
+                    err(f"{lg} {s}: {len(rows)} matches")
+                except Exception as e:
+                    err(f"{lg} {s}: failed ({e})")
+        return 0
+    seasons = R.parse_seasons(a.seasons or ("2017/2018:2025/2026" if a.source == "footballdata"
+                                            else "2021/2022:2025/2026"))
+    test = R.parse_seasons(a.test_seasons) if a.test_seasons else seasons[-1:]
+    res = R.run(a.source, leagues, seasons, test, model=a.model, max_n=a.max_n, carry_over=a.carry_over,
+                odds_src=a.odds, margin=a.margin, min_edge=a.min_edge,
+                sides=("over", "under") if a.both_sides else ("over",), do_search=not a.no_search,
+                passes=a.passes, log=err)
+    out = pathlib.Path(a.out) if a.out else (ROOT / "reports" / "backtests" /
+                                             f"{dt.date.today()}_{a.source}_{res['model']}.md")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(R.report(res))
+    out.with_suffix(".best.json").write_text(R.best_json(res))
+    print(f"report: {out}")
     return 0
 
 

@@ -28,6 +28,13 @@ PYTHONPATH=src python3 -m fpredict settle      # fill in final scores later
 PYTHONPATH=src python3 -m unittest discover -s tests
 ```
 
+To replay the model on past seasons and compare alternative weightings, see
+[`docs/BACKTESTING.md`](docs/BACKTESTING.md):
+
+```bash
+PYTHONPATH=src python3 -m fpredict backtest --source footballdata --seasons 2017/2018:2025/2026 --test-seasons 2024/2025,2025/2026
+```
+
 | Option | Meaning |
 |---|---|
 | `--leagues epl,laliga` | Limit leagues (`python3 -m fpredict leagues` lists the keys) |

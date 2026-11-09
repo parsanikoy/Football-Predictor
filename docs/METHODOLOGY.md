@@ -243,6 +243,10 @@ band. Do not change coefficients because of a short streak. Version 2 coefficien
 calibrated using separate training/calibration and out-of-sample test datasets. Never optimise on data later
 used to claim out-of-sample performance.
 
+The backtest harness (`fpredict backtest`, described in `docs/BACKTESTING.md`) implements this split. Its
+results are evidence for a proposed change, not a change in themselves: Version 1 coefficients stay as above
+until the user agrees to a Version 2 and the change is recorded here.
+
 ## 28. Limitations
 
 Five matches is a small sample; opponent quality varies and is only indirectly considered; red cards can

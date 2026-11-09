@@ -70,6 +70,10 @@ Commit the new report in `reports/`, the updated `data/prediction_log.csv` and a
 
 ## Version 2 (later)
 
+The historical backtest harness is ready: `PYTHONPATH=src python3 -m fpredict backtest ...` (see
+`docs/BACKTESTING.md`). Commit its reports in `reports/backtests/`.
+
+
 Once enough predictions are settled, backtest per METHODOLOGY §27 (Brier score, log loss, calibration, ROI,
 closing-line value, drawdown, by league, line and edge band) with separate calibration and out-of-sample
 sets. Don't change the Version 1 coefficients in `src/fpredict/config.py` without the user's agreement, and
