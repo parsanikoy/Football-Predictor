@@ -85,7 +85,7 @@ def fd_download(league, season, force=False):
 def fd_parse(text, league, season):
     rows = []
     for r in csv.DictReader(io.StringIO(text)):
-        r = {(k or "").strip(): (v or "").strip() for k, v in r.items()}
+        r = {k.strip(): (v or "").strip() for k, v in r.items() if k is not None and isinstance(v, (str, type(None)))}
         d, hg, ag = _date(r.get("Date", "")), _float(r.get("FTHG")), _float(r.get("FTAG"))
         if not d or hg is None or ag is None or not r.get("HomeTeam"):
             continue  # unplayed or malformed line
