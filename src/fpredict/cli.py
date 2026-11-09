@@ -27,8 +27,6 @@ def main(argv=None):
     r.add_argument("--to", dest="date_to", default=str(today + dt.timedelta(days=7)))
     r.add_argument("--leagues", default=",".join(C.LEAGUES), help="comma list of: " + ",".join(C.LEAGUES))
     r.add_argument("--only", action="append", default=[], help="substring of 'Home v Away' to include (repeatable)")
-    r.add_argument("--fallback", action="append", default=[],
-                   help="match substring (or 'all') the USER has approved for the fallback model")
     r.add_argument("--user-data", default=str(ROOT / "data" / "user_supplied.json"))
     r.add_argument("--no-odds", action="store_true", help="skip The Odds API (use user-supplied odds only)")
     r.add_argument("--full-odds", action="store_true",
@@ -44,19 +42,21 @@ def main(argv=None):
     h.add_argument("--seasons", default="2017/2018:2025/2026", help="'A:B' range or comma list, e.g. 2023/2024")
     b = sub.add_parser("backtest", help="replay the model on past seasons (docs/BACKTESTING.md)")
     b.add_argument("--source", choices=("footballdata", "pitchapi"), default="footballdata",
-                   help="footballdata: shots/SOT/corners + O/U 2.5 odds (fallback model); pitchapi: adds xG")
+                   help="footballdata: shots/SOT/corners + O/U 2.5 odds; pitchapi: same plus xG (for --model xg)")
     b.add_argument("--leagues", default=",".join(C.LEAGUES))
     b.add_argument("--seasons", help="'A:B' range or comma list (default: 2017/2018:2025/2026 for footballdata, "
                                      "2021/2022:2025/2026 for pitchapi)")
     b.add_argument("--test-seasons", help="held-out seasons (default: the last season in --seasons)")
-    b.add_argument("--model", choices=("preferred", "fallback"), help="default: preferred if the data has xG")
+    b.add_argument("--model", choices=("standard", "xg"), default="standard",
+                   help="standard: the live model's inputs; xg: research mode that also searches an xG weight "
+                        "(needs --source pitchapi)")
     b.add_argument("--max-n", type=int, default=10, help="largest sample size the search may try")
     b.add_argument("--carry-over", action="store_true", help="let team samples include previous-season matches")
     b.add_argument("--odds", default="avg", choices=("avg", "max", "b365", "pin", "pin_close", "avg_close"))
     b.add_argument("--margin", default="proportional", choices=("proportional", "shin", "power"))
     b.add_argument("--min-edge", type=float, default=C.MIN_EDGE_PP)
-    b.add_argument("--both-sides", action="store_true", help="also bet Unders (V1 only recommends Overs)")
-    b.add_argument("--no-search", action="store_true", help="score V1 only")
+    b.add_argument("--both-sides", action="store_true", help="also bet Unders (the live model only recommends Overs)")
+    b.add_argument("--no-search", action="store_true", help="score the live model only")
     b.add_argument("--passes", type=int, default=2)
     b.add_argument("--out", help="report path (default reports/backtests/<date>_<source>_<model>.md)")
     a = p.parse_args(argv)
@@ -86,7 +86,7 @@ def main(argv=None):
     bad = [x for x in leagues if x not in C.LEAGUES]
     if bad:
         p.error(f"unknown league(s): {bad}")
-    res = analysis.run(pitch, odds, leagues, a.date_from, a.date_to, fallback=a.fallback, only=a.only,
+    res = analysis.run(pitch, odds, leagues, a.date_from, a.date_to, only=a.only,
                        user=analysis.load_user_supplied(a.user_data), log=lambda m: print(m, file=sys.stderr))
     md = report.build(res)
     out = pathlib.Path(a.out) if a.out else ROOT / "reports" / f"{res['generated_at'][:10]}_{a.date_from}_{a.date_to}.md"

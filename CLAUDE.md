@@ -29,7 +29,7 @@ ODDS_API_KEY=<key> PYTHONPATH=src python3 -m fpredict run --from 2026-11-20 --to
 ```
 
 Useful options: `--leagues epl,laliga`, `--only "Liverpool"` (repeatable), `--full-odds`,
-`--no-odds`, `--fallback "<match>"` / `--fallback all`, `--no-log`, `--out <path>`.
+`--no-odds`, `--no-log`, `--out <path>`.
 `PYTHONPATH=src python3 -m fpredict leagues` lists the league keys.
 
 - **Odds credits:** by default each priced match costs 1 Odds API credit (alternate totals market only);
@@ -46,21 +46,22 @@ Useful options: `--leagues epl,laliga`, `--only "Liverpool"` (repeatable), `--fu
 
 ## Rules that need your judgement (the code cannot enforce them)
 
-- **Fallback model (§8):** if the report says xG/xGA is missing but the fallback inputs are complete, give
-  the user choice A (supply the xG/xGA values) or B (use the fallback). Only rerun with `--fallback` after
-  the user picks B for those matches.
+- **One model (Version 2, §7, §25):** shots, shots on target and corners over each team's last 10 league
+  matches. There is no xG model and no fallback choice. A team with fewer than 10 league matches this season
+  cannot be modelled; report it as blocked.
 - **User-supplied values (§5, §23):** put any value the user gives you into `data/user_supplied.json`
   (`match_stats`, `baselines` or `odds`). The report marks them "User supplied". Never fill gaps yourself.
 - **One-bookmaker rule (§19):** if no bookmaker covers every selection, say so plainly. Name the bookmaker
   with the largest subset and list what it is missing; don't present it as meeting the rule.
 - **Wording (§24, §25):** explain predictions with their Attack and Defensive Weakness Scores and expected
-  goals. Never call a selection guaranteed, safe, certain or risk-free. Large edges (e.g. over 10pp) more
-  often reflect model limitations (five-match samples, no injury data) than market error; say so.
+  goals. Never call a selection guaranteed, safe, certain or risk-free. The backtest found the model less
+  accurate than market prices and found no betting edge; describe edges as disagreement with the price, not
+  value, and say so whenever selections are shown. Large edges (e.g. over 10pp) mostly reflect model error.
 - **Odds freshness:** odds pulled days before kick-off move. Report the odds timestamp and suggest a
   re-run close to kick-off.
 - **Team-name mapping:** the report lists fuzzy matches between Odds API and PitchAPI names. Check them;
   add confirmed or corrected names to `data/team_aliases.json`.
-- **Stats revisions:** PitchAPI can revise xG shortly after full time. Stats less than 48 hours old are
+- **Stats revisions:** PitchAPI can revise stats shortly after full time. Stats less than 48 hours old are
   re-fetched each run rather than cached.
 
 ## After each analysis
@@ -68,13 +69,10 @@ Useful options: `--leagues epl,laliga`, `--only "Liverpool"` (repeatable), `--fu
 Commit the new report in `reports/`, the updated `data/prediction_log.csv` and any changes to
 `data/user_supplied.json` or `data/team_aliases.json`, then push, so the record survives the session.
 
-## Version 2 (later)
+## Model changes
 
-The historical backtest harness is ready: `PYTHONPATH=src python3 -m fpredict backtest ...` (see
-`docs/BACKTESTING.md`). Commit its reports in `reports/backtests/`.
-
-
-Once enough predictions are settled, backtest per METHODOLOGY §27 (Brier score, log loss, calibration, ROI,
-closing-line value, drawdown, by league, line and edge band) with separate calibration and out-of-sample
-sets. Don't change the Version 1 coefficients in `src/fpredict/config.py` without the user's agreement, and
-record any change in `docs/METHODOLOGY.md`.
+The live model is Version 2 (see METHODOLOGY §25 and §30). The backtest harness
+(`PYTHONPATH=src python3 -m fpredict backtest ...`, `docs/BACKTESTING.md`) is for testing proposed changes;
+commit its reports in `reports/backtests/`. Don't change the coefficients in `src/fpredict/config.py` without the
+user's agreement, and record any change in `docs/METHODOLOGY.md` §30. `data/prediction_log.csv` rows keep the
+`model_version` they were made with; compare versions separately when evaluating.

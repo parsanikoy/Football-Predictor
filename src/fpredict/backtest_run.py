@@ -54,9 +54,8 @@ def run(source, leagues, seasons, test_seasons, model=None, max_n=10, carry_over
     rows, notes, join = load_rows(source, leagues, seasons, log)
     if not rows:
         raise SystemExit("no historical rows loaded")
-    has_xg = sum(1 for r in rows if "xg" in r["stats"]["home"]) > len(rows) / 2
-    model = model or ("preferred" if has_xg else "fallback")
-    v1 = B.Variant.v1(model)
+    model = model or "standard"
+    v1 = B.Variant.live(model)   # the live configuration is the baseline every run compares against
     max_n = max(max_n, v1.n)
     snaps = B.snapshots(rows, carry_over=carry_over)
     elig = B.eligible(snaps, max_n, v1.fields())
@@ -128,7 +127,7 @@ def report(res):
     w(f"- Matches loaded: {res['rows']}. Eligible (both teams ≥ {res['max_n']} previous league matches "
       f"{'incl. previous seasons' if res['carry_over'] else 'this season'}, every input present): "
       f"calibration {res['n_cal']}, test {res['n_test']}")
-    w(f"- Every variant is scored on the same matches. V1 alone on its own eligibility (≥ 5 matches): "
+    w(f"- Every variant is scored on the same matches. Live model alone on its own eligibility (≥ {v1.n} matches): "
       f"{res['n_test_v1own']} test matches.")
     if res["join"]:
         m, n, pairs = res["join"]
@@ -138,13 +137,13 @@ def report(res):
         w(f"- Note: {nte}")
     w("")
     w("## Variants\n")
-    w(f"- **V1**: {v1.describe()}")
+    w(f"- **Live**: {v1.describe()}")
     if res["searched"]:
         w(f"- **Best on calibration seasons**: {best.describe()}")
     else:
-        w("- No search was run (no calibration seasons, or --no-search); 'best' below is V1.")
+        w("- No search was run (no calibration seasons, or --no-search); 'best' below is Live.")
     if res["searched"]:
-        w(f"- Calibration mean log loss (3 lines): V1 {_fmt(res['cal']['v1'], 5)} → best {_fmt(res['cal']['best'], 5)}\n")
+        w(f"- Calibration mean log loss (3 lines): Live {_fmt(res['cal']['v1'], 5)} → best {_fmt(res['cal']['best'], 5)}\n")
         w("Search path (coordinate descent on calibration seasons only):\n")
         w("| step | mean log loss |\n|---|---|")
         for name, _, sc in res["path"]:
@@ -152,8 +151,8 @@ def report(res):
     w("")
     w("## Test seasons: probability accuracy\n")
     w("Lower is better. 'League rate' predicts each league's over-rate so far this season. "
-      "Δ = best − V1 paired log loss with standard error; |Δ| < 2·SE is not a reliable difference.\n")
-    w("| line | n | V1 Brier | V1 log loss | best Brier | best log loss | league-rate log loss | Δ log loss (SE) | mean forecast V1 / best | observed |")
+      "Δ = best − Live paired log loss with standard error; |Δ| < 2·SE is not a reliable difference.\n")
+    w("| line | n | Live Brier | Live log loss | best Brier | best log loss | league-rate log loss | Δ log loss (SE) | mean forecast Live / best | observed |")
     w("|---|---|---|---|---|---|---|---|---|---|")
     for ln, d in res["lines"].items():
         a, b, nv = d["v1"], d["best"], d["naive"]
@@ -164,7 +163,7 @@ def report(res):
           f"{nv['logloss']:.4f} | {'-' if not df else f'{df[0]:+.4f} ({df[1]:.4f})'} | "
           f"{a['mean_p']:.3f} / {b['mean_p']:.3f} | {a['rate']:.3f} |")
     w("")
-    w("V1 on its own eligibility (≥ 5 matches): " + "; ".join(
+    w(f"Live model on its own eligibility (≥ {v1.n} matches): " + "; ".join(
         f"O{ln} log loss {d['logloss']:.4f} (n={d['n']})" for ln, d in res["v1_own"].items() if d))
     w("")
     w("### Market benchmark, Over 2.5 (same test matches)\n")
@@ -177,7 +176,7 @@ def report(res):
                 _fmt(res["market"][(src, m)]["logloss"]) for m in ("proportional", "shin", "power")) + " |")
     w("")
     w("### Calibration, Over 2.5 (test)\n")
-    w("| forecast bin | V1 n | V1 mean forecast | V1 observed | best n | best mean forecast | best observed |")
+    w("| forecast bin | Live n | Live mean forecast | Live observed | best n | best mean forecast | best observed |")
     w("|---|---|---|---|---|---|---|")
     cv = {(r[0], r[1]): r for r in res["lines"][2.5]["calib_v1"]}
     cb = {(r[0], r[1]): r for r in res["lines"][2.5]["calib_best"]}
@@ -187,7 +186,7 @@ def report(res):
           f"{b[2] if b else 0} | {_fmt(b and b[3], 3)} | {_fmt(b and b[4], 3)} |")
     w("")
     w("### Over 2.5 log loss by league (test)\n")
-    w("| league | n | V1 | best | league rate |\n|---|---|---|---|---|")
+    w("| league | n | Live | best | league rate |\n|---|---|---|---|---|")
     for lg, (n, a, b, nv) in res["by_league"].items():
         w(f"| {lg} | {n} | {a:.4f} | {b:.4f} | {nv:.4f} |")
     w("")
@@ -206,23 +205,23 @@ def report(res):
                 f"{_pct(b['clv'], 2) if b['clv'] is not None else '-'} |")
     hdr = "| | bets | profit (units) | ROI ± 2·SE | hit rate | avg odds | max drawdown | CLV |\n|---|---|---|---|---|---|---|---|"
     w(hdr)
-    w(bet_row("V1", res["bets"]["v1"]))
+    w(bet_row("Live", res["bets"]["v1"]))
     w(bet_row("best", res["bets"]["best"]))
-    w("\nV1 by qualifying edge threshold (the 4pp rule is a V1 assumption):\n")
+    w("\nLive by qualifying edge threshold (the 4pp rule is an untested assumption):\n")
     w(hdr)
     for t, (a, b) in res["bets_threshold"].items():
-        w(bet_row(f"V1 ≥{t}pp", a))
+        w(bet_row(f"Live ≥{t}pp", a))
         w(bet_row(f"best ≥{t}pp", b))
-    w("\nV1 by margin-removal method:\n")
+    w("\nLive by margin-removal method:\n")
     w(hdr)
     for m, b in res["bets_margin"].items():
         w(bet_row(m, b))
     for name in ("v1", "best"):
         b = res["bets"][name]
         if b.get("bands"):
-            w(f"\n{name.upper() if name == 'v1' else 'Best'} by edge band: " + "; ".join(
+            w(f"\n{'Live' if name == 'v1' else 'Best'} by edge band: " + "; ".join(
                 f"{k}: {n} bets, ROI {_pct(r)}" for k, (n, r) in b["bands"].items()))
-            w(f"{name.upper() if name == 'v1' else 'Best'} by league: " + "; ".join(
+            w(f"{'Live' if name == 'v1' else 'Best'} by league: " + "; ".join(
                 f"{k}: {n} bets, ROI {_pct(r)}" for k, (n, r) in b["leagues"].items()))
     w("")
     w("## Reading this report\n")

@@ -5,56 +5,68 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from fpredict import analysis, model as M  # noqa: E402
+from fpredict import analysis, config as C, model as M  # noqa: E402
 
-BASE = {"xg": 1.5, "shots": 14.0, "sot": 5.0, "corners": 5.0, "home_goals": 1.6, "away_goals": 1.3,
-        "sources": {}}
+BASE = {"shots": 14.0, "sot": 5.0, "corners": 5.0, "home_goals": 1.6, "away_goals": 1.3, "sources": {}}
+N = C.SAMPLE_SIZE
 
 
 def avg_sample(scale=1.0):
-    row = {f: BASE[f] * scale for f in ("xg", "shots", "sot", "corners")}
-    row.update({"conc_" + f: BASE[f] * scale for f in ("xg", "shots", "sot", "corners")})
-    return [dict(row) for _ in range(5)]
+    row = {f: BASE[f] * scale for f in C.MODEL_FIELDS}
+    row.update({"conc_" + f: BASE[f] * scale for f in C.MODEL_FIELDS})
+    return [dict(row) for _ in range(N)]
 
 
 class TestModel(unittest.TestCase):
+    def test_version_2_coefficients(self):
+        self.assertEqual(C.MODEL_VERSION, "V2")
+        self.assertEqual(N, 10)
+        self.assertAlmostEqual(sum(C.RECENCY_WEIGHTS), 1.0)
+        self.assertAlmostEqual(C.RECENCY_WEIGHTS[8] / C.RECENCY_WEIGHTS[0], 0.5)   # half-life 8 matches
+        self.assertAlmostEqual(sum(C.ATTACK_WEIGHTS.values()), 1.0)
+        self.assertAlmostEqual(C.SHRINK_MODEL + C.SHRINK_LEAGUE, 1.0)
+
     def test_weights_sum_to_one(self):
-        self.assertAlmostEqual(M.weighted([1, 1, 1, 1, 1]), 1.0)
-        self.assertAlmostEqual(M.weighted([10, 0, 0, 0, 0]), 3.0)
+        self.assertAlmostEqual(M.weighted([1] * N), 1.0)
+        self.assertAlmostEqual(M.weighted([10] + [0] * (N - 1)), 10 * C.RECENCY_WEIGHTS[0])
 
     def test_missing_value_is_never_zero(self):
         with self.assertRaises(ValueError):
-            M.weighted([1, None, 1, 1, 1])
+            M.weighted([1, None] + [1] * (N - 2))
         with self.assertRaises(ValueError):
-            M.weighted([1, 1, 1, 1])
+            M.weighted([1] * (N - 1))
 
     def test_league_average_team_scores_one(self):
-        for mode in ("preferred", "fallback"):
-            s = M.team_scores(avg_sample(), BASE, mode)
-            self.assertAlmostEqual(s["attack"], 1.0)
-            self.assertAlmostEqual(s["dw"], 1.0)
+        s = M.team_scores(avg_sample(), BASE)
+        self.assertAlmostEqual(s["attack"], 1.0)
+        self.assertAlmostEqual(s["dw"], 1.0)
 
     def test_score_caps(self):
-        hi = M.team_scores(avg_sample(2.0), BASE, "preferred")
-        lo = M.team_scores(avg_sample(0.3), BASE, "preferred")
+        hi = M.team_scores(avg_sample(2.0), BASE)
+        lo = M.team_scores(avg_sample(0.3), BASE)
         self.assertEqual((hi["attack"], hi["attack_capped"]), (1.50, True))
         self.assertEqual((lo["dw"], lo["dw_capped"]), (0.65, True))
 
     def test_expected_goals_shrinkage_and_caps(self):
-        avg = M.team_scores(avg_sample(), BASE, "preferred")
+        avg = M.team_scores(avg_sample(), BASE)
         e = M.expected_goals(avg, avg, BASE)
         self.assertAlmostEqual(e["home"], 1.6)
         self.assertAlmostEqual(e["away"], 1.3)
-        top = M.team_scores(avg_sample(3.0), BASE, "preferred")
+        top = M.team_scores(avg_sample(3.0), BASE)
         e = M.expected_goals(top, top, BASE)
-        # raw away = 1.3 * 1.5 * 1.5 = 2.925 -> shrunk 0.75*2.925 + 0.25*1.3 = 2.519 (under 2.75 cap)
-        self.assertAlmostEqual(e["away"], 0.75 * 2.925 + 0.25 * 1.3)
+        # raw away = 1.3 * 1.5 * 1.5 = 2.925 -> shrunk 0.55*2.925 + 0.45*1.3
+        self.assertAlmostEqual(e["away"], 0.55 * 2.925 + 0.45 * 1.3)
         self.assertFalse(e["caps"]["away_xg"])
 
-    def test_poisson_known_values(self):
-        p = M.poisson_overs(2.5)
-        self.assertAlmostEqual(p[1.5], 1 - math.exp(-2.5) * (1 + 2.5))
-        self.assertAlmostEqual(p[2.5], 0.456186, places=5)
+    def test_dixon_coles_probabilities(self):
+        h, a = 1.4, 1.1
+        p = M.over_probs(h, a)
+        lam = h + a
+        poisson_o15 = 1 - math.exp(-lam) * (1 + lam)
+        # rho -0.10 moves h*a*0.10*P(0-0) of probability out of 1-0/0-1 net, so P(Over 1.5) rises by that much
+        self.assertAlmostEqual(p[1.5] - poisson_o15, h * a * 0.10 * math.exp(-lam))
+        self.assertAlmostEqual(sum(M.total_goals_dist(h, a, rho=0.0, upto=3)),
+                               sum(math.exp(-lam) * lam ** k / math.factorial(k) for k in range(4)))
         self.assertGreaterEqual(p[1.5], p[2.5])
         self.assertGreaterEqual(p[2.5], p[3.5])
 
@@ -73,17 +85,15 @@ class TestModel(unittest.TestCase):
         self.assertEqual(M.rating(7.0), "Strong model difference")
 
 
-def ctx_with(xg_missing=False, shots_missing=False):
+def ctx_with(shots_missing=False, matches=N + 1):
     finished = []
-    for i in range(6):
+    for i in range(matches):
         for home, away in (("A", "X"), ("Y", "B")):
             st = {s: {"xg": 1.5, "shots": 14.0, "sot": 5.0, "corners": 5.0} for s in ("home", "away")}
-            if i == 0 and home == "A":
-                if xg_missing:
-                    del st["home"]["xg"]
-                if shots_missing:
-                    del st["away"]["shots"]
-            finished.append({"id": f"m{i}{home}", "date": f"2026-10-{20 - i:02d}", "time_utc": f"2026-10-{20 - i:02d}T15:00:00Z",
+            if i == 0 and home == "A" and shots_missing:
+                del st["away"]["shots"]
+            d = f"2026-10-{28 - i:02d}"
+            finished.append({"id": f"m{i}{home}", "date": d, "time_utc": f"{d}T15:00:00Z",
                              "home_team": {"id": home, "name": home}, "away_team": {"id": away, "name": away},
                              "score_home": 1, "score_away": 1, "stats": st, "user_fields": []})
     return {"finished": finished, "baseline": dict(BASE)}
@@ -95,23 +105,27 @@ def fixture():
 
 
 class TestRules(unittest.TestCase):
-    def test_complete_data_uses_preferred(self):
-        fx = analysis.analyse(fixture(), ctx_with(), fallback_ok=False)
-        self.assertEqual((fx["status"], fx["model_type"]), ("modelled", "preferred"))
+    def test_complete_data_is_modelled(self):
+        fx = analysis.analyse(fixture(), ctx_with())
+        self.assertEqual((fx["status"], fx["model_type"]), ("modelled", "V2"))
+        self.assertEqual(len(fx["samples"]["home"]), N)
 
-    def test_missing_xg_needs_user_choice(self):
-        fx = analysis.analyse(fixture(), ctx_with(xg_missing=True), fallback_ok=False)
-        self.assertEqual(fx["status"], "needs_fallback_choice")
-        self.assertEqual(fx["missing"], [("home", "2026-10-20", "X", "xg")])
+    def test_xg_is_not_required(self):
+        ctx = ctx_with()
+        for m in ctx["finished"]:
+            for side in ("home", "away"):
+                m["stats"][side].pop("xg")
+        self.assertEqual(analysis.analyse(fixture(), ctx)["status"], "modelled")
 
-    def test_fallback_only_after_consent(self):
-        fx = analysis.analyse(fixture(), ctx_with(xg_missing=True), fallback_ok=True)
-        self.assertEqual((fx["status"], fx["model_type"]), ("modelled", "fallback"))
-
-    def test_missing_core_field_blocks(self):
-        fx = analysis.analyse(fixture(), ctx_with(shots_missing=True), fallback_ok=True)
+    def test_missing_field_blocks(self):
+        fx = analysis.analyse(fixture(), ctx_with(shots_missing=True))
         self.assertEqual(fx["status"], "blocked")
-        self.assertIn(("home", "2026-10-20", "X", "conc_shots"), fx["missing"])
+        self.assertIn(("home", "2026-10-28", "X", "conc_shots"), fx["missing"])
+
+    def test_too_few_matches_blocks(self):
+        fx = analysis.analyse(fixture(), ctx_with(matches=N - 1))
+        self.assertEqual(fx["status"], "blocked")
+        self.assertIn(("home", "-", "-", f"only {N - 1} of {N} completed league matches this season"), fx["missing"])
 
     def test_one_bookmaker_rule_requires_full_coverage(self):
         price = lambda o, u: {"title": "", "over": o, "under": u, "raw": 1 / o,

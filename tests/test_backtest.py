@@ -31,21 +31,20 @@ def random_league(seed=1, rounds=12):
 
 
 class TestBacktest(unittest.TestCase):
-    def test_v1_matches_live_model(self):
-        """The backtest's V1 must reproduce src/fpredict/model.py on the same inputs."""
-        snaps = B.eligible(B.snapshots(random_league()), 5, B.Variant.v1().fields())
+    def test_live_variant_matches_live_model(self):
+        """The backtest's live variant must reproduce src/fpredict/model.py on the same inputs."""
+        v = B.Variant.live()
+        snaps = B.eligible(B.snapshots(random_league(rounds=16)), v.n, v.fields())
         self.assertGreater(len(snaps), 5)
-        for mode in ("preferred", "fallback"):
-            v = B.Variant.v1(mode)
-            for s, (h, a, t), P in B.Evaluator(snaps, v.fields()).predict(v):
-                base = s["base"]
-                H_ = M.team_scores(s["home"][:5], base, mode)
-                A_ = M.team_scores(s["away"][:5], base, mode)
-                E = M.expected_goals(H_, A_, base)
-                self.assertAlmostEqual(h, E["home"])
-                self.assertAlmostEqual(a, E["away"])
-                for ln, p in M.poisson_overs(E["total"]).items():
-                    self.assertAlmostEqual(P[ln], p)
+        for s, (h, a, t), P in B.Evaluator(snaps, v.fields()).predict(v):
+            base = s["base"]
+            H_ = M.team_scores(s["home"][:v.n], base)
+            A_ = M.team_scores(s["away"][:v.n], base)
+            E = M.expected_goals(H_, A_, base)
+            self.assertAlmostEqual(h, E["home"])
+            self.assertAlmostEqual(a, E["away"])
+            for ln, p in M.over_probs(E["home"], E["away"]).items():
+                self.assertAlmostEqual(P[ln], p)
 
     def test_no_same_day_or_future_leakage(self):
         rows = [row("2024-08-10", "A", "B", 3, 3), row("2024-08-10", "C", "A", 0, 0), row("2024-08-17", "A", "C", 1, 0)]
@@ -74,7 +73,7 @@ class TestBacktest(unittest.TestCase):
 
     def test_distributions(self):
         p = B.over_probs(1.4, 1.1, "poisson")
-        self.assertAlmostEqual(p[2.5], M.poisson_overs(2.5)[2.5])
+        self.assertAlmostEqual(p[2.5], 1 - math.exp(-2.5) * (1 + 2.5 + 2.5 ** 2 / 2))
         nb = B.over_probs(1.4, 1.1, "negbin", 1e6)
         self.assertAlmostEqual(nb[2.5], p[2.5], places=4)
         dc0 = B.over_probs(1.4, 1.1, "dc", 0.0)
@@ -98,8 +97,8 @@ class TestBacktest(unittest.TestCase):
         self.assertGreater(B.fair_over(1.3, 3.4, "power"), prop)
 
     def test_bets_and_metrics(self):
-        snaps = B.eligible(B.snapshots(random_league()), 5, B.Variant.v1().fields())
-        preds = B.Evaluator(snaps, ("xg", "shots", "sot", "corners")).predict(B.Variant.v1())
+        snaps = B.eligible(B.snapshots(random_league(rounds=16)), 10, B.Variant.live().fields())
+        preds = B.Evaluator(snaps, B.Variant.live().fields()).predict(B.Variant.live())
         b = B.bet_metrics(preds, "avg", "proportional", -100, ("over",))
         self.assertEqual(b["n"], len(preds))
         wins = sum(1 for s, _, _ in preds if B.outcome(s, 2.5))

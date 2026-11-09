@@ -1,4 +1,4 @@
-# Football Total-Goals Model — Version 1 Specification
+# Football Total-Goals Model — Version 2 Specification
 
 This is the authoritative specification. The code in `src/fpredict/` implements it; where the two
 disagree, this document wins and the code must be fixed.
@@ -45,26 +45,26 @@ bookmaker names. If a material field cannot be read, ask specifically for that i
 
 ## 4. Football data
 
-Use the configured football-data source (this project: **PitchAPI**). For EACH team, retrieve the FIVE most
-recent COMPLETED matches played in the SAME domestic league. Never use cup, European, international,
-friendly or qualifying matches to complete the sample.
+Use the configured football-data source (this project: **PitchAPI**). For EACH team, retrieve the TEN most
+recent COMPLETED matches played in the SAME domestic league in the current season. Never use cup, European,
+international, friendly or qualifying matches to complete the sample. A team with fewer than ten completed
+league matches this season cannot be modelled yet; say so.
 
-For every one of those five matches retrieve:
+For every one of those ten matches retrieve:
 
-- Attacking: xG (where available), total shots, shots on target, corners.
-- Defensive: xGA (where available), total shots conceded, shots on target conceded, corners conceded.
+- Attacking: total shots, shots on target, corners.
+- Defensive: total shots conceded, shots on target conceded, corners conceded.
 
-Also retrieve current league baselines: average xG per team per match (if xG is used), average total shots,
-shots on target and corners per team per match, average home goals per match and average away goals per
-match. League averages must relate to the relevant competition and current season wherever sufficient
-current-season information exists.
+Also retrieve current-season league baselines: average total shots, shots on target and corners per team per
+match, average home goals per match and average away goals per match.
+
+xG/xGA is not a model input in Version 2 (§25). It may be retrieved for backtest research only.
 
 ## 5. Data validation
 
 Every numerical model input must (A) come from the configured source, or (B) be explicitly supplied by the
 user. Never: invent statistics; infer unavailable numerical values; treat missing information as zero; guess
-xG or xGA; guess league averages; substitute goals for missing xG; use cup games to complete the five-game
-sample; silently change methodology.
+league averages; use cup games to complete the ten-game sample; silently change methodology.
 
 ## 6. Missing data
 
@@ -76,45 +76,35 @@ When information is missing, identify EVERY currently identifiable missing field
 Be precise, e.g. "I need Arsenal's shots on target against Everton on 6 November." Do not simply say "I need
 more data." Never interpret unavailable data as zero.
 
-## 7. Preferred xG model
+## 7. Model scores
 
-When complete xG and xGA data exists for BOTH teams across all five qualifying matches:
+When complete data exists for BOTH teams across all ten qualifying matches:
 
-- ATTACK SCORE = 0.50 × xG Ratio + 0.25 × SOT Ratio + 0.15 × Total-Shots Ratio + 0.10 × Corners Ratio
-- DEFENSIVE WEAKNESS SCORE = 0.50 × xGA Ratio + 0.25 × SOT-Conceded Ratio + 0.15 × Shots-Conceded Ratio + 0.10 × Corners-Conceded Ratio
+- ATTACK SCORE = 0.35 × SOT Ratio + 0.45 × Total-Shots Ratio + 0.20 × Corners Ratio
+- DEFENSIVE WEAKNESS SCORE = 0.35 × SOT-Conceded Ratio + 0.45 × Shots-Conceded Ratio + 0.20 × Corners-Conceded Ratio
 
-Label: "Model type: Preferred xG model".
+Label: "Model type: Version 2 shots / shots on target / corners model (V2)". There is one model; if any
+input is missing the match is blocked and every missing field is listed (§6, §22).
 
-## 8. Fallback model
+## 8. (Retired) Fallback model
 
-If xG/xGA is unavailable but complete shots, SOT, corners and their conceded equivalents are available for
-BOTH teams across all five matches, DO NOT silently use the fallback model. Instead:
-
-1. Identify the missing xG/xGA fields.
-2. Explain that the preferred model cannot currently be run.
-3. State that the fallback model can be run.
-4. Give the user two choices: A. provide the missing xG/xGA values, or B. proceed using the fallback model.
-
-Only use the fallback model after the user chooses Option B (CLI: `--fallback "<match>"` or `--fallback all`).
-
-- ATTACK SCORE = 0.45 × SOT Ratio + 0.35 × Total-Shots Ratio + 0.20 × Corners Ratio
-- DEFENSIVE WEAKNESS SCORE = 0.45 × SOT-Conceded Ratio + 0.35 × Shots-Conceded Ratio + 0.20 × Corners-Conceded Ratio
-
-Label: "Model type: Shots/SOT/Corners fallback model. xG/xGA unavailable." Never mix preferred and fallback
-methodologies within one fixture.
+Version 1 had a preferred xG model and a shots/SOT/corners fallback chosen by the user (options A/B).
+Version 2 has a single model (§7), so there is no fallback and no A/B choice.
 
 ## 9. Recency weighting
 
-Most recent = 30%, second = 25%, third = 20%, fourth = 15%, fifth = 10%.
-WEIGHTED METRIC = 0.30·M1 + 0.25·M2 + 0.20·M3 + 0.15·M4 + 0.10·M5.
+Ten matches, each weight half the weight of the match eight places more recent (half-life 8 matches),
+normalised to sum to 1. Most recent first, in percent:
+14.3, 13.1, 12.0, 11.0, 10.1, 9.3, 8.5, 7.8, 7.2, 6.6.
+WEIGHTED METRIC = Σ wᵢ · Mᵢ.
 
 ## 10. League normalisation
 
 League averages are a measurement baseline, not the prediction.
 
-- Attack: xG Ratio = Weighted xG / League Avg xG; SOT Ratio = Weighted SOT / League Avg SOT;
+- Attack: SOT Ratio = Weighted SOT / League Avg SOT;
   Shots Ratio = Weighted Shots / League Avg Shots; Corners Ratio = Weighted Corners / League Avg Corners.
-- Defence: xGA Ratio = Weighted xGA / League Avg xG; SOT-Conceded Ratio = Weighted SOT Conceded / League Avg
+- Defence: SOT-Conceded Ratio = Weighted SOT Conceded / League Avg
   SOT; Shots-Conceded Ratio = Weighted Shots Conceded / League Avg Shots; Corners-Conceded Ratio = Weighted
   Corners Conceded / League Avg Corners.
 
@@ -126,21 +116,24 @@ Cap Attack and Defensive Weakness Scores to [0.65, 1.50]. Record whenever a cap 
 
 ## 12. Raw expected goals
 
-- Raw Home xG = League Avg Home Goals × Home Attack Score × Away Defensive Weakness Score
-- Raw Away xG = League Avg Away Goals × Away Attack Score × Home Defensive Weakness Score
+- Raw Home Goals = League Avg Home Goals × Home Attack Score × Away Defensive Weakness Score
+- Raw Away Goals = League Avg Away Goals × Away Attack Score × Home Defensive Weakness Score
 
-## 13. 75/25 shrinkage
+## 13. 55/45 shrinkage
 
-- Final Home xG = 0.75 × Raw Home xG + 0.25 × League Avg Home Goals, capped to [0.35, 3.25]
-- Final Away xG = 0.75 × Raw Away xG + 0.25 × League Avg Away Goals, capped to [0.25, 2.75]
-- Expected Total Goals = Final Home + Final Away, capped to [0.75, 5.25]
+- Final Home = 0.55 × Raw Home + 0.45 × League Avg Home Goals, capped to [0.35, 3.25]
+- Final Away = 0.55 × Raw Away + 0.45 × League Avg Away Goals, capped to [0.25, 2.75]
+- Expected Total Goals = Final Home + Final Away, capped to [0.75, 5.25]; if the total cap applies, home and
+  away are scaled in proportion so they still sum to the capped total.
 
-Disclose whenever a cap is applied. The 75/25 ratio is a provisional Version 1 assumption, not proven
-optimal through backtesting.
+Disclose whenever a cap is applied.
 
-## 14. Poisson model
+## 14. Goal distribution
 
-λ = Expected Total Goals; P(X = k) = e^(−λ) λ^k / k!.
+Home goals ~ Poisson(Final Home), away goals ~ Poisson(Final Away), with the Dixon–Coles (1997) low-score
+correction τ, ρ = −0.10:
+τ(0,0) = 1 − h·a·ρ, τ(1,0) = 1 + a·ρ, τ(0,1) = 1 + h·ρ, τ(1,1) = 1 − ρ, τ = 1 otherwise.
+P(total = k) = Σ over i + j = k of τ(i,j) · Pois(i; h) · Pois(j; a).
 P(Over 1.5) = 1 − P(0) − P(1); P(Over 2.5) = 1 − P(0..2); P(Over 3.5) = 1 − P(0..3).
 Display to one decimal place. Validate P(O1.5) ≥ P(O2.5) ≥ P(O3.5); if validation fails, do not report.
 
@@ -158,7 +151,7 @@ difference. These describe differences between the model and the price only.
 
 ## 17. Qualifying selections
 
-A selection qualifies only when: it is in an eligible league; both teams have five valid completed league
+A selection qualifies only when: it is in an eligible league; both teams have ten valid completed league
 games; core model data is available; the match has not started; odds are sufficiently current; model edge
 ≥ +4.0pp. Only ONE total-goals line may be recommended per match — the one with the largest positive edge.
 Still show calculations for the other lines.
@@ -193,25 +186,18 @@ individual component prices rather than an observed final combined quote." Never
 3. **RECOMMENDED LINE BY MATCH** — `| Match | Recommended line | Model % | Implied % | Model edge |`
 4. **SINGLE BOOKMAKER ASSESSMENT** — recommended bookmaker and reason; optional
    `| Bookmaker | All matches? | All selected markets? | Pricing assessment | Eligible? |`
-5. **MODEL INPUTS AND AUDIT TRAIL** — per team: five matches, dates, competition, weighted metrics,
+5. **MODEL INPUTS AND AUDIT TRAIL** — per team: ten matches, dates, competition, weighted metrics,
    league-relative ratios, Attack and Defensive Weakness Scores, raw and final expected goals, caps, model type.
 
 ## 22. Missing-data output
 
 If any calculation cannot be completed, end with **DATA I STILL NEED FROM YOU** (table in §6), listing
-EVERY identifiable missing input and asking for exact numbers. If ONLY xG/xGA is missing while all fallback
-fields are complete, state:
-
-> The Preferred xG Model cannot currently be completed because the xG/xGA fields listed above are unavailable.
-> You can either:
-> A. Provide the missing xG/xGA values; or
-> B. Tell me to proceed with the Shots/SOT/Corners fallback model.
+EVERY identifiable missing input and asking for exact numbers.
 
 ## 23. Data integrity
 
-NEVER: invent statistics; treat missing statistics as zero; invent xG/xGA, league averages or bookmaker
-odds; guess screenshot odds; use non-league games in the sample; silently use the fallback; mix
-methodologies; fabricate combined prices; present estimates as facts; describe a bet as guaranteed; change
+NEVER: invent statistics; treat missing statistics as zero; invent league averages or bookmaker
+odds; guess screenshot odds; use non-league games in the sample; mix methodologies; fabricate combined prices; present estimates as facts; describe a bet as guaranteed; change
 methodology without disclosure. User-supplied values are recorded as "Source: User supplied".
 
 ## 24. Result explanation
@@ -220,13 +206,23 @@ Explain predictions with actual model drivers, e.g. "The model estimates Over 2.
 drivers are the home team's 1.27 Attack Score and the away team's 1.19 Defensive Weakness Score, producing
 expected total goals of 3.18." Avoid vague explanations.
 
-## 25. Version 1 status
+## 25. Version 2 status
 
-Provisional assumptions: preferred weights 50/25/15/10; fallback weights 45/35/20; recency 30/25/20/15/10;
-shrinkage 75/25; qualifying edge +4.0pp. These have NOT been shown optimal by historical backtesting. Do not
-claim external research proves these coefficients. Distinguish (1) principles motivated by research,
-(2) Version 1 implementation assumptions, (3) findings demonstrated by empirical backtesting. Never describe
-category 2 as category 3.
+Version 2 coefficients (§7, §9, §13, §14) were chosen by the historical backtest (`docs/BACKTESTING.md`):
+coordinate search on 2005/06–2023/24 seasons (33,533 matches) and a single check on held-out 2024/25–2025/26
+(4,606 matches) in `reports/backtests/2026-11-09_footballdata_fallback_2005-2026.md`.
+
+Demonstrated on the held-out seasons (category 3):
+- Better probability accuracy than Version 1 on every line (Over 2.5 log loss 0.685 vs 0.693, difference about
+  five standard errors) and better than the league-average benchmark (0.690).
+- Expected totals are well calibrated by band (predicted 2.39 → actual 2.42 … 3.60 → 3.56).
+- Still clearly less accurate than the market's margin-free prices (Over 2.5 log loss 0.671). Combining the
+  model with the market price did not improve on the market. Betting on +4pp edges lost money (about −9% at
+  market-average odds).
+
+So model edge against a bookmaker price is a measure of disagreement, not evidence of value. Distinguish
+(1) principles motivated by research, (2) implementation assumptions (caps, the +4.0pp threshold, which were not
+re-tuned), (3) findings demonstrated by backtesting. Never describe category 2 as category 3.
 
 ## 26. Performance record
 
@@ -235,21 +231,20 @@ away and total goals, P(Over 1.5/2.5/3.5), bookmaker, odds, odds timestamp, raw 
 margin-adjusted probability, model edge, recommended market, actual final score when available, outcome for
 each analysed market, closing odds where available. Never invent missing results or closing prices.
 
-## 27. Version 2 calibration
+## 27. Recalibration
 
-Use Version 1 results to backtest Version 2. Evaluate: Brier score, log loss, calibration, ROI, closing-line
-value, maximum drawdown, number of qualifying selections, and performance by league, goal line and edge
-band. Do not change coefficients because of a short streak. Version 2 coefficients should be empirically
-calibrated using separate training/calibration and out-of-sample test datasets. Never optimise on data later
-used to claim out-of-sample performance.
-
-The backtest harness (`fpredict backtest`, described in `docs/BACKTESTING.md`) implements this split. Its
-results are evidence for a proposed change, not a change in themselves: Version 1 coefficients stay as above
-until the user agrees to a Version 2 and the change is recorded here.
+Use settled live predictions and the backtest harness (`fpredict backtest`, `docs/BACKTESTING.md`) to evaluate
+any future change: Brier score, log loss, calibration, ROI, closing-line value, maximum drawdown, number of
+qualifying selections, and performance by league, goal line and edge band. Do not change coefficients because of
+a short streak. Calibrate on separate training/calibration seasons and confirm on held-out test seasons; never
+optimise on data later used to claim out-of-sample performance. Backtest results are evidence for a proposed
+change, not a change in themselves: coefficients change only when the user agrees, and the change is recorded
+in §30.
 
 ## 28. Limitations
 
-Five matches is a small sample; opponent quality varies and is only indirectly considered; red cards can
+Ten matches is still a small sample and needs ten completed league matches this season, so early-season
+fixtures cannot be modelled; opponent quality varies and is only indirectly considered; red cards can
 distort statistics; injuries, player availability, tactical and managerial changes are not incorporated;
 Poisson makes simplifying assumptions; probabilities are estimates; positive edge does not guarantee
 profitability; odds can change rapidly. Prefer transparent calculations over false precision.
@@ -260,3 +255,12 @@ profitability; odds can change rapidly. Prefer transparent calculations over fal
 5. Probability calculation 6. Bookmaker comparison 7. Ranking.
 Never sacrifice data integrity merely to return a result. Every reported probability must be reproducible
 from the disclosed inputs and methodology.
+
+## 30. Change log
+
+- **Version 2 (2026-11-09), agreed by the user.** Single model; xG removed as an input; 10-match sample with
+  half-life-8 recency weights; score weights SOT 0.35 / shots 0.45 / corners 0.20; shrinkage 0.55/0.45;
+  Dixon–Coles ρ = −0.10 replaces plain Poisson on the total. Evidence: §25.
+- **Version 1 (2026-11-08).** Preferred xG model 50/25/15/10 and fallback 45/35/20; five matches weighted
+  30/25/20/15/10; shrinkage 0.75/0.25; Poisson on the total. Rows in `data/prediction_log.csv` marked V1
+  were made with it.

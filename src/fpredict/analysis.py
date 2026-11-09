@@ -21,8 +21,8 @@ def iso(t):
 
 # ---------------------------------------------------------------- user-supplied data
 def load_user_supplied(path):
-    """JSON: {"match_stats": {"<pitch match id>": {"home": {"xg": 1.2}, "away": {...}}},
-              "baselines": {"<league key>": {"xg": 1.45, ...}},
+    """JSON: {"match_stats": {"<pitch match id>": {"home": {"sot": 4}, "away": {...}}},
+              "baselines": {"<league key>": {"shots": 12.4, ...}},
               "odds": [{"home": "...", "away": "...", "bookmaker": "...", "line": 2.5,
                         "over": 1.9, "under": 1.95, "captured_at": "..."}]}"""
     if not path:
@@ -37,7 +37,7 @@ def league_context(pitch, league, now, user):
     data = pitch.league_matches(lid)
     matches = data["matches"]
     finished = [m for m in matches if m["status"] == "finished" and m["time_utc"] < iso(now)]
-    # PitchAPI can revise stats (notably xG) shortly after full time, so only cache settled matches.
+    # PitchAPI can revise stats shortly after full time, so only cache settled matches.
     settled = iso(now - dt.timedelta(hours=48))
     with ThreadPoolExecutor(6) as ex:
         stats = list(ex.map(lambda m: parse_team_stats(
@@ -52,7 +52,7 @@ def league_context(pitch, league, now, user):
                     s[side][f] = float(v)
                     m["user_fields"].append(f"{side}.{f}")
     base, cov = {}, {}
-    for f in ("xg", "shots", "sot", "corners"):
+    for f in C.MODEL_FIELDS:
         vals = [m["stats"][s][f] for m in finished for s in ("home", "away") if f in m["stats"][s]]
         base[f] = sum(vals) / len(vals) if vals else None
         cov[f] = (len(vals), 2 * len(finished))
@@ -73,7 +73,7 @@ def league_context(pitch, league, now, user):
 
 
 def team_sample(ctx, team_id):
-    """Five most recent completed league matches. Returns (rows, missing[(date, opponent, field)])."""
+    """SAMPLE_SIZE most recent completed league matches this season. Returns (rows, missing[(date, opponent, field)])."""
     played = sorted((m for m in ctx["finished"] if team_id in (m["home_team"]["id"], m["away_team"]["id"])),
                     key=lambda m: m["time_utc"], reverse=True)[:C.SAMPLE_SIZE]
     rows, missing = [], []
@@ -83,7 +83,7 @@ def team_sample(ctx, team_id):
         row = {"match_id": m["id"], "date": m["date"], "venue": s[0].upper(),
                "opponent": m[o + "_team"]["name"], "score": f"{m['score_home']}-{m['score_away']}",
                "user_fields": [x for x in m["user_fields"]]}
-        for f in ("xg", "shots", "sot", "corners"):
+        for f in C.MODEL_FIELDS:
             row[f] = m["stats"][s].get(f)
             row["conc_" + f] = m["stats"][o].get(f)
             for key in (f, "conc_" + f):
@@ -133,10 +133,10 @@ def attach_odds(fixtures, ctx_by_league, odds_client, user, log):
 
 
 # ---------------------------------------------------------------- per-fixture model
-def analyse(fx, ctx, fallback_ok):
+def analyse(fx, ctx):
     base = ctx["baseline"]
     fx["baseline"] = base
-    for need in ("shots", "sot", "corners", "home_goals", "away_goals"):
+    for need in C.MODEL_FIELDS + ("home_goals", "away_goals"):
         if base.get(need) is None:
             fx["missing"].append(("league", "-", "-", f"league average {need}"))
     samples = {}
@@ -144,28 +144,18 @@ def analyse(fx, ctx, fallback_ok):
         rows, miss = team_sample(ctx, fx[side + "_id"])
         samples[side] = rows
         if len(rows) < C.SAMPLE_SIZE:
-            fx["missing"].append((side, "-", "-", f"only {len(rows)} completed league matches this season"))
+            fx["missing"].append((side, "-", "-", f"only {len(rows)} of {C.SAMPLE_SIZE} completed league matches "
+                                                   "this season"))
         fx["missing"] += [(side,) + m for m in miss]
     fx["samples"] = samples
-    xg_missing = [m for m in fx["missing"] if m[-1] in ("xg", "conc_xg")]
-    if base.get("xg") is None:
-        xg_missing.append(("league", "-", "-", "league average xG"))
-    core_missing = [m for m in fx["missing"] if m not in xg_missing]
-    if core_missing:
+    if fx["missing"]:
         fx["status"] = "blocked"
         return fx
-    if xg_missing:
-        if not fallback_ok:
-            fx["status"] = "needs_fallback_choice"
-            fx["missing"] = xg_missing
-            return fx
-        fx["model_type"] = "fallback"
-    else:
-        fx["model_type"] = "preferred"
-    H = M.team_scores(samples["home"], base, fx["model_type"])
-    A = M.team_scores(samples["away"], base, fx["model_type"])
+    fx["model_type"] = C.MODEL_VERSION
+    H = M.team_scores(samples["home"], base)
+    A = M.team_scores(samples["away"], base)
     E = M.expected_goals(H, A, base)
-    fx.update(status="modelled", H=H, A=A, E=E, P=M.poisson_overs(E["total"]))
+    fx.update(status="modelled", H=H, A=A, E=E, P=M.over_probs(E["home"], E["away"]))
     return fx
 
 
@@ -219,7 +209,7 @@ def bookmaker_assessment(fixtures, recs):
 
 
 # ---------------------------------------------------------------- top level
-def run(pitch, odds_client, leagues, date_from, date_to, fallback=(), only=(), user=None, log=print):
+def run(pitch, odds_client, leagues, date_from, date_to, only=(), user=None, log=print):
     user = user or {}
     now = utcnow()
     ctx_by_league, fixtures, excluded = {}, [], []
@@ -244,10 +234,8 @@ def run(pitch, odds_client, leagues, date_from, date_to, fallback=(), only=(), u
             fixtures.append(fx)
     log(f"fixtures in window: {len(fixtures)}")
     mapping_notes = attach_odds(fixtures, ctx_by_league, odds_client, user, log)
-    fb_all = "all" in [x.lower() for x in fallback]
     for fx in fixtures:
-        ok = fb_all or any(x.lower() in fx["label"].lower() for x in fallback)
-        analyse(fx, ctx_by_league[fx["league"]], ok)
+        analyse(fx, ctx_by_league[fx["league"]])
     recs = recommend(fixtures)
     return {"generated_at": iso(now), "window": (date_from, date_to), "leagues": leagues,
             "contexts": ctx_by_league, "fixtures": fixtures, "excluded": excluded, "recs": recs,

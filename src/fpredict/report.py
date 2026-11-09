@@ -2,7 +2,7 @@
 from . import config as C
 from . import model as M
 
-FIELD_NAMES = {"xg": "xG", "conc_xg": "xGA (xG conceded)", "shots": "total shots",
+FIELD_NAMES = {"shots": "total shots",
                "conc_shots": "total shots conceded", "sot": "shots on target",
                "conc_sot": "shots on target conceded", "corners": "corners", "conc_corners": "corners conceded"}
 
@@ -19,7 +19,6 @@ def build(res):
     F = res["fixtures"]
     modelled = [f for f in F if f["status"] == "modelled"]
     blocked = [f for f in F if f["status"] == "blocked"]
-    choice = [f for f in F if f["status"] == "needs_fallback_choice"]
     recs, fx_by = res["recs"], {f["key"]: f for f in F}
     L = []
     w = L.append
@@ -34,13 +33,7 @@ def build(res):
     w(f"- Matches excluded: {len(res['excluded'])}" + "".join(f"\n  - {a} ({b}): {c}" for a, b, c in res["excluded"]))
     w(f"- Matches successfully modelled: {len(modelled)}")
     w(f"- Matches blocked by missing data: {len(blocked)}")
-    w(f"- Matches awaiting the xG-vs-fallback choice: {len(choice)}")
-    types = {}
-    for f in modelled:
-        types.setdefault(f["model_type"], []).append(f["label"])
-    for t, labels in types.items():
-        name = "Preferred xG model" if t == "preferred" else "Shots/SOT/Corners fallback model. xG/xGA unavailable."
-        w(f"- Model type: {name}: {len(labels)} match(es)" + ("" if t == "preferred" else ": " + ", ".join(labels)))
+    w(f"- Model type: {C.MODEL_LABEL} ({C.MODEL_VERSION}) for all modelled matches")
     no_odds = [f["label"] for f in modelled if not f.get("edges")]
     w(f"- Modelled matches with no UK sportsbook price on any line: {len(no_odds)}")
     w(f"- Qualifying selections (edge ≥ +{C.MIN_EDGE_PP}pp, one per match): {len(recs)}")
@@ -116,12 +109,12 @@ def build(res):
 
     # ---- missing data
     need = []
-    for f in blocked + choice:
+    for f in blocked:
         for side, date, opp, field in f["missing"]:
             team = f.get(side, side) if side in ("home", "away") else side
             fixture = f"{date} v {opp}" if opp != "-" else f["label"]
             nm = FIELD_NAMES.get(field, field)
-            why = "Preferred xG model input" if "xg" in field else "Core model input (both models)"
+            why = "Model input"
             need.append(f"| {f['label']} | {team} | {fixture} | {nm} | {why} |")
     for f in modelled:
         if not f.get("edges"):
@@ -137,23 +130,25 @@ def build(res):
         w("| Match | Team | Date/fixture | Missing field | Why required |")
         w("|-------|------|--------------|---------------|--------------|")
         L.extend(need)
-        if choice and not blocked:
-            w("\nThe Preferred xG Model cannot currently be completed because the xG/xGA fields listed above are "
-              "unavailable.\n\nYou can either:\n\nA. Provide the missing xG/xGA values; or\n\n"
-              "B. Tell me to proceed with the Shots/SOT/Corners fallback model.\n")
         w("")
 
     # ---- audit
     w("## MODEL INPUTS AND AUDIT TRAIL\n")
-    w("Recency weights 30/25/20/15/10 (most recent first). Scores capped 0.65–1.50. Final xG = 0.75 × raw + "
-      "0.25 × league average; home xG capped 0.35–3.25, away 0.25–2.75, total 0.75–5.25. All coefficients are "
-      "Version 1 assumptions, not backtested.\n")
-    w("| League | Season | Matches | Avg xG/team | Avg shots/team | Avg SOT/team | Avg corners/team | Avg home goals | Avg away goals |")
-    w("|---|---|---|---|---|---|---|---|---|")
+    rw = "/".join(f"{x * 100:.1f}" for x in C.RECENCY_WEIGHTS)
+    wt = " / ".join(f"{k} {v:.2f}" for k, v in C.ATTACK_WEIGHTS.items())
+    w(f"{C.MODEL_LABEL}. Last {C.SAMPLE_SIZE} league matches, recency weights {rw}% (most recent first; "
+      f"half-life {C.RECENCY_HALF_LIFE} matches). Score weights {wt}. Scores capped {C.SCORE_MIN}–{C.SCORE_MAX}. "
+      f"Final expected goals = {C.SHRINK_MODEL} × raw + {C.SHRINK_LEAGUE} × league average; home capped "
+      f"{C.HOME_XG_MIN}–{C.HOME_XG_MAX}, away {C.AWAY_XG_MIN}–{C.AWAY_XG_MAX}, total {C.TOTAL_MIN}–{C.TOTAL_MAX}. "
+      f"Probabilities: Poisson home and away goals with the Dixon–Coles low-score correction (rho {C.DC_RHO}). "
+      "Coefficients were chosen by historical backtest (METHODOLOGY §25); the backtest found no betting edge "
+      "against market prices.\n")
+    w("| League | Season | Matches | Avg shots/team | Avg SOT/team | Avg corners/team | Avg home goals | Avg away goals |")
+    w("|---|---|---|---|---|---|---|---|")
     for lg, c in res["contexts"].items():
         bs = c["baseline"]
         fmt = lambda k, n=3: "n/a" if bs.get(k) is None else f"{bs[k]:.{n}f}" + (" (User supplied)" if k in bs["sources"] else "")
-        w(f"| {c['name']} | {c['season']} | {c['n_finished']} | {fmt('xg')} | {fmt('shots', 2)} | {fmt('sot', 2)} | "
+        w(f"| {c['name']} | {c['season']} | {c['n_finished']} | {fmt('shots', 2)} | {fmt('sot', 2)} | "
           f"{fmt('corners', 2)} | {fmt('home_goals')} | {fmt('away_goals')} |")
     order = sorted(modelled, key=lambda f: (f["key"] not in recs, -(recs.get(f["key"], (0,))[0]), f["kickoff"]))
     for f in order:
@@ -180,18 +175,16 @@ def cap_list(modelled):
 
 
 def audit(w, f):
-    label = "Preferred xG model" if f["model_type"] == "preferred" else \
-        "Shots/SOT/Corners fallback model. xG/xGA unavailable."
     w(f"\n### {f['label']} — {f['league_name']}, {ko(f['kickoff'])} UTC\n")
-    w(f"Model type: {label}\n")
+    w(f"Model type: {C.MODEL_LABEL} ({C.MODEL_VERSION})\n")
     for side, S in (("home", f["H"]), ("away", f["A"])):
-        w(f"**{f[side]}**: five most recent completed {f['league_name']} matches\n")
-        w("| # | Date | Opponent | H/A | Score | xG | xGA | Shots | Shots conc. | SOT | SOT conc. | Corners | Corners conc. | Reds for/against | Source |")
-        w("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+        w(f"**{f[side]}**: {C.SAMPLE_SIZE} most recent completed {f['league_name']} matches\n")
+        w("| # | Date | Opponent | H/A | Score | Shots | Shots conc. | SOT | SOT conc. | Corners | Corners conc. | Reds for/against | Source |")
+        w("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
         for i, r in enumerate(f["samples"][side], 1):
             v = lambda k, n=0: "-" if r[k] is None else f"{r[k]:.{n}f}"
             src = "PitchAPI" + ("; User supplied: " + ", ".join(r["user_fields"]) if r["user_fields"] else "")
-            w(f"| {i} | {r['date']} | {r['opponent']} | {r['venue']} | {r['score']} | {v('xg', 2)} | {v('conc_xg', 2)} | "
+            w(f"| {i} | {r['date']} | {r['opponent']} | {r['venue']} | {r['score']} | "
               f"{v('shots')} | {v('conc_shots')} | {v('sot')} | {v('conc_sot')} | {v('corners')} | {v('conc_corners')} | "
               f"{'-' if r['red_for'] is None else int(r['red_for'])}/{'-' if r['red_against'] is None else int(r['red_against'])} | {src} |")
         W, R = S["weighted"], S["ratios"]
@@ -199,9 +192,9 @@ def audit(w, f):
         w(f"Attack Score {S['attack']:.3f}" + (f" (capped from {S['attack_raw']:.3f})" if S["attack_capped"] else "") +
           f"; Defensive Weakness Score {S['dw']:.3f}" + (f" (capped from {S['dw_raw']:.3f})" if S["dw_capped"] else "") + "\n")
     E, b = f["E"], f["baseline"]
-    w(f"Raw home xG = {b['home_goals']:.3f} × {f['H']['attack']:.3f} × {f['A']['dw']:.3f} = {E['raw_home']:.3f}; "
-      f"raw away xG = {b['away_goals']:.3f} × {f['A']['attack']:.3f} × {f['H']['dw']:.3f} = {E['raw_away']:.3f}  ")
-    w(f"Final home {E['home']:.3f}, final away {E['away']:.3f}, expected total λ = {E['total']:.3f}"
+    w(f"Raw home expected goals = {b['home_goals']:.3f} × {f['H']['attack']:.3f} × {f['A']['dw']:.3f} = {E['raw_home']:.3f}; "
+      f"raw away = {b['away_goals']:.3f} × {f['A']['attack']:.3f} × {f['H']['dw']:.3f} = {E['raw_away']:.3f}  ")
+    w(f"Final home {E['home']:.3f}, final away {E['away']:.3f}, expected total = {E['total']:.3f}"
       f"{' (caps: ' + ', '.join(k for k, v in E['caps'].items() if v) + ')' if any(E['caps'].values()) else ''}  ")
     w(f"P(Over 1.5) {f['P'][1.5] * 100:.1f}% ≥ P(Over 2.5) {f['P'][2.5] * 100:.1f}% ≥ P(Over 3.5) {f['P'][3.5] * 100:.1f}% (validated)\n")
     if f["odds"]:

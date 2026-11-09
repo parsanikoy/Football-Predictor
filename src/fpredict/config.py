@@ -1,7 +1,10 @@
-"""Version 1 configuration. Every coefficient here is a PROVISIONAL assumption
-that has NOT been validated by historical backtesting (see docs/METHODOLOGY.md §25)."""
+"""Version 2 configuration (docs/METHODOLOGY.md §25). Coefficients were chosen by the historical backtest:
+tuned on 2005/06-2023/24 and checked on held-out 2024/25-2025/26
+(reports/backtests/2026-11-09_footballdata_fallback_2005-2026.md). Do not change them without the user's
+agreement; record any change in docs/METHODOLOGY.md."""
 
-MODEL_VERSION = "V1"
+MODEL_VERSION = "V2"
+MODEL_LABEL = "Version 2 shots / shots on target / corners model"
 
 # key -> (display name, The Odds API sport key, PitchAPI league id)
 LEAGUES = {
@@ -20,13 +23,14 @@ SPORT_TO_LEAGUE = {v[1]: k for k, v in LEAGUES.items()}
 
 LINES = (1.5, 2.5, 3.5)
 
-# Recency weights, most recent first (§9)
-RECENCY_WEIGHTS = (0.30, 0.25, 0.20, 0.15, 0.10)
-SAMPLE_SIZE = 5
+# Sample and recency (§4, §9): the last 10 league matches, weight halving every 8 matches, normalised
+SAMPLE_SIZE = 10
+RECENCY_HALF_LIFE = 8
+_RAW = [0.5 ** (i / RECENCY_HALF_LIFE) for i in range(SAMPLE_SIZE)]
+RECENCY_WEIGHTS = tuple(w / sum(_RAW) for w in _RAW)   # most recent first; 0.143 ... 0.066
 
-# Score weights (§7, §8)
-PREFERRED_ATTACK = {"xg": 0.50, "sot": 0.25, "shots": 0.15, "corners": 0.10}
-FALLBACK_ATTACK = {"sot": 0.45, "shots": 0.35, "corners": 0.20}
+# Score weights (§7): the same weights build the Attack and the Defensive Weakness Score
+ATTACK_WEIGHTS = {"sot": 0.35, "shots": 0.45, "corners": 0.20}
 
 # Caps (§11, §13)
 SCORE_MIN, SCORE_MAX = 0.65, 1.50
@@ -35,8 +39,11 @@ AWAY_XG_MIN, AWAY_XG_MAX = 0.25, 2.75
 TOTAL_MIN, TOTAL_MAX = 0.75, 5.25
 
 # Shrinkage (§13)
-SHRINK_MODEL = 0.75
-SHRINK_LEAGUE = 0.25
+SHRINK_MODEL = 0.55
+SHRINK_LEAGUE = 0.45
+
+# Goal distribution (§14): Dixon-Coles low-score correction on independent Poisson home/away goals
+DC_RHO = -0.10
 
 # Qualifying edge in percentage points (§17)
 MIN_EDGE_PP = 4.0
@@ -44,11 +51,11 @@ MIN_EDGE_PP = 4.0
 # Exchanges: prices are pre-commission and they do not offer multi-match bets.
 EXCHANGES = {"betfair_ex_uk", "betfair_ex_eu", "matchbook", "smarkets"}
 
-# PitchAPI stat keys
+# PitchAPI stat keys. xG is retrieved only for backtest research (`fpredict backtest --model xg`);
+# the live model does not use it.
 STAT_KEYS = {"xg": "expected_goals", "shots": "total_shots", "sot": "ShotsOnTarget",
              "corners": "corners", "red": "red_cards"}
-CORE_FIELDS = ("shots", "sot", "corners")   # needed by both models
-XG_FIELD = "xg"                              # needed by preferred model only
+MODEL_FIELDS = ("shots", "sot", "corners")   # every one is required for both teams in all 10 matches
 
 ODDS_BASE = "https://api.the-odds-api.com/v4"
 PITCH_BASE = "https://api.pitchapi.dev/v1"

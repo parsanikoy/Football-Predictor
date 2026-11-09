@@ -1,11 +1,11 @@
 """Backtest harness (docs/METHODOLOGY.md §27, docs/BACKTESTING.md).
 
-Replays the Version 1 model point-in-time over historical seasons with every coefficient exposed as a
+Replays the live model point-in-time over historical seasons with every coefficient exposed as a
 parameter, so alternative inputs, weightings and distributions can be compared:
 
   snapshots()  - for each historical match, what the live model could have known before kick-off:
                  each team's previous league matches (most recent first) and the league averages so far.
-  Variant      - one complete parameter set. Variant.v1() reproduces src/fpredict/model.py exactly.
+  Variant      - one complete parameter set. Variant.live() reproduces src/fpredict/model.py exactly.
   evaluate()   - probabilities for every eligible match; prob_metrics() / bet_metrics() score them.
   search()     - coordinate search over weights, recency, shrinkage, caps and distribution, run on the
                  CALIBRATION seasons only. The chosen variant is then scored once on the held-out TEST
@@ -23,19 +23,21 @@ EPS = 1e-6
 # ---------------------------------------------------------------- variants
 @dataclasses.dataclass(frozen=True)
 class Variant:
-    model: str = "preferred"                      # 'preferred' (needs xG) or 'fallback'
-    weights: tuple = tuple(C.PREFERRED_ATTACK.items())   # ((field, weight), ...) same for attack & defence
+    model: str = "standard"                       # 'standard' (live inputs) or 'xg' (research: adds xG)
+    weights: tuple = tuple(C.ATTACK_WEIGHTS.items())     # ((field, weight), ...) same for attack & defence
     recency: tuple = C.RECENCY_WEIGHTS            # most recent first; its length is the sample size
     shrink: float = C.SHRINK_MODEL                # weight on the model; 1 - shrink on the league average
-    caps: bool = True                             # V1 score / xG / total caps
-    dist: str = "poisson"                         # 'poisson' | 'dc' (Dixon-Coles, rho) | 'negbin' (size k)
-    dist_param: float = 0.0
-    recency_label: str = "V1 30/25/20/15/10"
+    caps: bool = True                             # score / expected-goals / total caps
+    dist: str = "dc"                              # 'poisson' | 'dc' (Dixon-Coles, rho) | 'negbin' (size k)
+    dist_param: float = C.DC_RHO
+    recency_label: str = f"half-life {C.RECENCY_HALF_LIFE} matches"
 
     @classmethod
-    def v1(cls, model="preferred"):
-        w = C.PREFERRED_ATTACK if model == "preferred" else C.FALLBACK_ATTACK
-        return cls(model=model, weights=tuple(w.items()))
+    def live(cls, model="standard"):
+        """The live configuration. With model='xg' the search starts from it with an xG weight of 0."""
+        if model == "xg":
+            return cls(model="xg", weights=(("xg", 0.0),) + tuple(C.ATTACK_WEIGHTS.items()))
+        return cls()
 
     @property
     def n(self):
@@ -59,8 +61,6 @@ class Variant:
 
 def recency_weights(n, kind, half_life=None):
     """-> (weights most-recent-first summing to 1, label)."""
-    if kind == "v1":
-        return C.RECENCY_WEIGHTS, "V1 30/25/20/15/10"
     if kind == "equal":
         w = [1.0] * n
     elif kind == "linear":
@@ -79,8 +79,8 @@ def snapshots(rows, carry_over=False):
     """rows from history.py (any leagues/seasons). Returns chronological snapshots:
     {'row', 'home': [records most recent first], 'away': [...], 'base': league averages so far}.
     Only matches on EARLIER dates feed a snapshot (same-day matches are never used).
-    Team history resets each season unless carry_over (V1 uses current-season matches only);
-    league averages always reset each season, as in V1."""
+    Team history resets each season unless carry_over (the live model uses current-season matches only);
+    league averages always reset each season, as in the live model."""
     out = []
     leagues = {}
     for r in rows:
@@ -308,7 +308,7 @@ def fair_over(over, under, method="proportional"):
 def bet_metrics(preds, odds_src="avg", margin="proportional", min_edge=C.MIN_EDGE_PP, sides=("over",),
                 close_src="pin_close", line=2.5):
     """Flat 1-unit stakes on every selection whose model edge >= min_edge (pp), at most one per match
-    (largest edge), in kick-off order. V1 only recommends Overs; pass sides=('over','under') to test both."""
+    (largest edge), in kick-off order. The live model only recommends Overs; pass sides=('over','under') to test both."""
     bets = []
     for s, _, P in preds:
         od = s["row"]["odds"].get(odds_src)
@@ -386,11 +386,11 @@ def weight_grid(fields, step):
 
 
 def dimensions(model, max_n):
-    fields = ("xg", "sot", "shots", "corners") if model == "preferred" else ("sot", "shots", "corners")
-    step = 0.1 if model == "preferred" else 0.05
+    fields = ("xg", "sot", "shots", "corners") if model == "xg" else ("sot", "shots", "corners")
+    step = 0.1 if model == "xg" else 0.05
 
     def rec(v):
-        out = [recency_weights(5, "v1")] if max_n >= 5 else []
+        out = [(C.RECENCY_WEIGHTS, f"half-life {C.RECENCY_HALF_LIFE} matches")] if max_n >= C.SAMPLE_SIZE else []
         for n in sorted({x for x in (3, 5, 6, 8, 10, 12, 15, 20) if x <= max_n}):
             for kind, hl in (("equal", None), ("linear", None), ("exp", 2), ("exp", 4), ("exp", 8)):
                 out.append(recency_weights(n, kind, hl))
@@ -410,7 +410,7 @@ def dimensions(model, max_n):
 def search(evaluator, start, max_n, passes=2, log=print):
     """Coordinate descent on mean log loss. Returns (best variant, best score, path)."""
     best, best_s = start, mean_logloss(evaluator.predict(start))
-    path = [("start (V1)", best, best_s)]
+    path = [("start (live model)", best, best_s)]
     for p in range(passes):
         improved = False
         for name, gen in dimensions(start.model, max_n):
